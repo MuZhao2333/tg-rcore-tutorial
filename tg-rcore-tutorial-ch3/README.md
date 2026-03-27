@@ -1,3 +1,18 @@
+### 陈子陶 2023012157
+# 复现
+1. 通过crates.io：
+   ```bash
+    cargo clone Chenzt23-tg-rcore-tutorial-ch3
+    cd Chenzt23-tg-rcore-tutorial-ch3
+    bash test.sh all
+    ```
+2. 通过github：
+    ```bash
+     git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
+     cd tg-rcore-tutorial/tg-rcore-tutorial-ch3
+     bash test.sh all
+    ```
+
 # 第三章：多道程序与分时多任务
 
 本章在第二章"批处理系统"的基础上，实现了一个**多道程序操作系统**（tg-rcore-tutorial-ch3）。它支持多个用户程序同时驻留在内存中并发执行，通过时钟中断实现**抢占式调度**，通过 `yield` 系统调用支持**协作式调度**，并引入了时间管理功能。
