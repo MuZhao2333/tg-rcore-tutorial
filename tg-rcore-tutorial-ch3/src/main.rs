@@ -64,7 +64,7 @@ const APP_CAPACITY: usize = 32;
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
 unsafe extern "C" fn _start() -> ! {
-    const STACK_SIZE: usize = (APP_CAPACITY + 2) * 8192;
+    const STACK_SIZE: usize = (APP_CAPACITY + 2) * 16384;
     #[unsafe(link_section = ".boot.stack")]
     static mut STACK: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
 
@@ -78,6 +78,9 @@ unsafe extern "C" fn _start() -> ! {
 }
 
 // ========== 内核主函数 ==========
+
+/// 当前运行任务的全局指针，用于在 SyscallContext::trace 中获取当前任务信息。
+pub static mut CURRENT_TCB: *mut TaskControlBlock = core::ptr::null_mut();
 
 /// 内核主函数：初始化各子系统，然后以多道方式并发运行所有用户程序。
 ///
@@ -124,6 +127,7 @@ extern "C" fn rust_main() -> ! {
     let mut i = 0usize; // 当前任务索引
     while remain > 0 {
         let tcb = &mut tcbs[i];
+        unsafe { CURRENT_TCB = tcb as *mut TaskControlBlock };
         if !tcb.finish {
             loop {
                 // 【抢占式调度】设置时钟中断：12500 个时钟周期后触发
@@ -306,12 +310,41 @@ mod impls {
         fn trace(
             &self,
             _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
+            trace_request: usize,
+            id: usize,
+            data: usize,
         ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
+            match trace_request {
+                0 => {
+                    // 读取以 id 为地址的 1 字节整数
+                    let ptr = id as *const u8;
+                    unsafe { (*ptr) as isize }
+                }
+                1 => {
+                    // 写入最低字节的 data 到 id 地址
+                    let ptr = id as *mut u8;
+                    unsafe {
+                        *ptr = data as u8;
+                    }
+                    0
+                }
+                2 => {
+                    // 查询调用编号为 id 的系统调用次数
+                    if id < 500 {
+                        unsafe {
+                            if !crate::CURRENT_TCB.is_null() {
+                                let tcb = &*crate::CURRENT_TCB;
+                                tcb.syscall_counts[id] as isize
+                            } else {
+                                -1
+                            }
+                        }
+                    } else {
+                        -1
+                    }
+                }
+                _ => -1,
+            }
         }
     }
 }

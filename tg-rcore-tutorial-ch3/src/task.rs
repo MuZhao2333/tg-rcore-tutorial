@@ -31,8 +31,8 @@ pub struct TaskControlBlock {
     pub finish: bool,
     /// 用户栈：8 KiB（1024 个 usize = 1024 × 8 = 8192 字节）
     /// 每个任务拥有独立的栈空间，避免栈溢出影响其他任务
-    stack: [usize; 1024],
-}
+    stack: [usize; 1024],  
+    pub syscall_counts: [usize; 500],}   /// 系统调用计数：记录该任务调用各系统调用的次数
 
 /// 调度事件
 ///
@@ -55,6 +55,7 @@ impl TaskControlBlock {
         ctx: LocalContext::empty(),
         finish: false,
         stack: [0; 1024],
+        syscall_counts: [0; 500],
     };
 
     /// 初始化一个任务
@@ -89,6 +90,11 @@ impl TaskControlBlock {
 
         // a7 寄存器存放 syscall ID
         let id = self.ctx.a(7).into();
+        let id_val: usize = self.ctx.a(7);
+        if id_val < 500 {
+            self.syscall_counts[id_val] += 1;
+        }
+
         // a0-a5 寄存器存放系统调用参数
         let args = [
             self.ctx.a(0),
