@@ -645,11 +645,27 @@ mod impls {
         ///
         /// TODO: 实现 spawn 系统调用（练习题）
         fn spawn(&self, _caller: Caller, _path: usize, _count: usize) -> isize {
-            let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "spawn: parent pid = {}, not implemented",
-                current.pid.get_usize()
-            );
+            const READABLE: VmFlags<Sv39> = build_flags("RV");
+            let processor: *mut PManager<ProcStruct, ProcManager> = PROCESSOR.get_mut() as *mut _;
+            let current = unsafe { (*processor).current().unwrap() };
+            let parent_pid = current.pid;
+
+            let elf_file = current
+                .address_space
+                .translate::<u8>(VAddr::new(_path), READABLE)
+                .map(|ptr| unsafe {
+                    core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr.as_ptr(), _count))
+                })
+                .and_then(|name| APPS.get(name))
+                .and_then(|input| ElfFile::new(input).ok());
+
+            if let Some(elf) = elf_file {
+                if let Some(child_proc) = ProcStruct::from_elf(elf) {
+                    let pid = child_proc.pid;
+                    unsafe { (*processor).add(pid, child_proc, parent_pid) };
+                    return pid.get_usize() as isize;
+                }
+            }
             -1
         }
 
@@ -680,13 +696,12 @@ mod impls {
         ///
         /// TODO: 实现 set_priority 系统调用（练习题：stride 调度算法）
         fn set_priority(&self, _caller: Caller, prio: isize) -> isize {
+            if prio < 2 {
+                return -1;
+            }
             let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "set_priority: pid = {}, prio = {}, not implemented",
-                current.pid.get_usize(),
-                prio
-            );
-            -1
+            current.priority = prio as usize;
+            prio
         }
     }
 
@@ -739,18 +754,82 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            if addr % 4096 != 0 {
+                return -1;
+            }
+            if prot & !0x7 != 0 || prot == 0 {
+                return -1;
+            }
+
+            let flags = match prot & 7 {
+                1 => build_flags("U_RV"),
+                2 => build_flags("U_WV"),
+                3 => build_flags("U_WRV"),
+                4 => build_flags("U_XV"),
+                5 => build_flags("U_XRV"),
+                6 => build_flags("U_XWV"),
+                7 => build_flags("U_XWRV"),
+                _ => return -1,
+            };
+
+            let start_vpn = addr / 4096;
+            let count = (len + 4095) / 4096;
+            let end_vpn = start_vpn + count;
+
+            let process = PROCESSOR.get_mut().current().unwrap();
+
+            for area in &process.address_space.areas {
+                if area.start.val() < end_vpn && area.end.val() > start_vpn {
+                    return -1;
+                }
+            }
+
+            if count > 0 {
+                use tg_kernel_vm::page_table::VPN;
+                process.address_space.map(
+                    VPN::new(start_vpn)..VPN::new(end_vpn),
+                    &[],
+                    0,
+                    flags,
+                );
+                #[cfg(target_arch = "riscv64")]
+                unsafe {
+                    core::arch::asm!("sfence.vma");
+                }
+            }
+            0
         }
 
         /// munmap 系统调用：取消内存映射
         ///
         /// TODO: 实现 munmap 系统调用（练习题）
         fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+            if addr % 4096 != 0 {
+                return -1;
+            }
+
+            let start_vpn = addr / 4096;
+            let count = (len + 4095) / 4096;
+            let end_vpn = start_vpn + count;
+
+            let process = PROCESSOR.get_mut().current().unwrap();
+
+            for v in start_vpn..end_vpn {
+                let is_mapped = process.address_space.areas.iter().any(|a| a.start.val() <= v && v < a.end.val());
+                if !is_mapped {
+                    return -1;
+                }
+            }
+
+            if count > 0 {
+                use tg_kernel_vm::page_table::VPN;
+                process.address_space.unmap(VPN::new(start_vpn)..VPN::new(end_vpn));
+                #[cfg(target_arch = "riscv64")]
+                unsafe {
+                    core::arch::asm!("sfence.vma");
+                }
+            }
+            0
         }
     }
 }
