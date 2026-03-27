@@ -2,14 +2,14 @@
 # 复现
 1. 通过crates.io：
    ```bash
-    cargo clone Chenzt23-tg-rcore-tutorial-ch3
-    cd Chenzt23-tg-rcore-tutorial-ch3
+    cargo clone Chenzt23-tg-rcore-tutorial-ch4
+    cd Chenzt23-tg-rcore-tutorial-ch4
     bash test.sh all
     ```
 2. 通过github：
     ```bash
      git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
-     cd tg-rcore-tutorial/tg-rcore-tutorial-ch3
+     cd tg-rcore-tutorial/tg-rcore-tutorial-ch4
      bash test.sh all
     ```
     

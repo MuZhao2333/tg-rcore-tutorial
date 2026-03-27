@@ -1,7 +1,7 @@
 [package]
 name = "Chenzt23-tg-rcore-tutorial-ch4"
 description = "Chapter 4 of rCore Tutorial: Address space management with SV39 virtual memory."
-version = "0.0.1-preview.1"
+version = "0.0.2-preview.1"
 edition = "2024"
 authors = ["Zitao Chen <chen-zt23@mails.tsinghua.edu.cn>"]
 repository = "https://github.com/MuZhao2333/tg-rcore-tutorial/"
