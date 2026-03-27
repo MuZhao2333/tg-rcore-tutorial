@@ -249,6 +249,11 @@ extern "C" fn schedule() -> ! {
                 let ctx = &mut ctx.context;
                 let id: Id = ctx.a(7).into();
                 let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
+
+                if id.0 < 500 {
+                    unsafe { PROCESSES.get_mut()[0].syscall_counts[id.0] += 1 };
+                }
+
                 match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
                     Ret::Done(ret) => match id {
                         // exit：移除进程
@@ -565,13 +570,48 @@ mod impls {
         #[inline]
         fn trace(
             &self,
-            _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
+            caller: Caller,
+            trace_request: usize,
+            id: usize,
+            data: usize,
         ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
+            match trace_request {
+                0 => {
+                    use tg_kernel_vm::page_table::VAddr;
+                    if let Some(ptr) = unsafe { PROCESSES.get_mut() }
+                        .get_mut(caller.entity)
+                        .unwrap()
+                        .address_space
+                        .translate::<u8>(VAddr::new(id), build_flags("U_RV"))
+                    {
+                        unsafe { (*ptr.as_ptr()) as isize }
+                    } else {
+                        -1
+                    }
+                }
+                1 => {
+                    use tg_kernel_vm::page_table::VAddr;
+                    if let Some(mut ptr) = unsafe { PROCESSES.get_mut() }
+                        .get_mut(caller.entity)
+                        .unwrap()
+                        .address_space
+                        .translate::<u8>(VAddr::new(id), build_flags("U_WV"))
+                    {
+                        unsafe { *ptr.as_mut() = data as u8; }
+                        0
+                    } else {
+                        -1
+                    }
+                }
+                2 => {
+                    if id < 500 {
+                        (unsafe { PROCESSES.get_mut() })[caller.entity].syscall_counts[id] as isize
+                    } else {
+                        -1
+                    }
+                }
+                _ => -1,
+            }
         }
     }
 
@@ -582,7 +622,7 @@ mod impls {
     impl Memory for SyscallContext {
         fn mmap(
             &self,
-            _caller: Caller,
+            caller: Caller,
             addr: usize,
             len: usize,
             prot: i32,
@@ -590,15 +630,79 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            if addr % 4096 != 0 {
+                return -1;
+            }
+            if prot & !0x7 != 0 || prot == 0 {
+                return -1;
+            }
+
+            let flags = match prot & 7 {
+                1 => build_flags("U_RV"),
+                2 => build_flags("U_WV"),
+                3 => build_flags("U_WRV"),
+                4 => build_flags("U_XV"),
+                5 => build_flags("U_XRV"),
+                6 => build_flags("U_XWV"),
+                7 => build_flags("U_XWRV"),
+                _ => return -1,
+            };
+
+            let start_vpn = addr / 4096;
+            let count = (len + 4095) / 4096;
+            let end_vpn = start_vpn + count;
+
+            let process = unsafe { PROCESSES.get_mut() }.get_mut(caller.entity).unwrap();
+
+            for area in &process.address_space.areas {
+                if area.start.val() < end_vpn && area.end.val() > start_vpn {
+                    return -1;
+                }
+            }
+
+            if count > 0 {
+                use tg_kernel_vm::page_table::VPN;
+                process.address_space.map(
+                    VPN::new(start_vpn)..VPN::new(end_vpn),
+                    &[],
+                    0,
+                    flags,
+                );
+                #[cfg(target_arch = "riscv64")]
+                unsafe {
+                    core::arch::asm!("sfence.vma");
+                }
+            }
+            0
         }
 
-        fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+        fn munmap(&self, caller: Caller, addr: usize, len: usize) -> isize {
+            if addr % 4096 != 0 {
+                return -1;
+            }
+
+            let start_vpn = addr / 4096;
+            let count = (len + 4095) / 4096;
+            let end_vpn = start_vpn + count;
+
+            let process = unsafe { PROCESSES.get_mut() }.get_mut(caller.entity).unwrap();
+
+            for v in start_vpn..end_vpn {
+                let is_mapped = process.address_space.areas.iter().any(|a| a.start.val() <= v && v < a.end.val());
+                if !is_mapped {
+                    return -1;
+                }
+            }
+
+            if count > 0 {
+                use tg_kernel_vm::page_table::VPN;
+                process.address_space.unmap(VPN::new(start_vpn)..VPN::new(end_vpn));
+                #[cfg(target_arch = "riscv64")]
+                unsafe {
+                    core::arch::asm!("sfence.vma");
+                }
+            }
+            0
         }
     }
 }
