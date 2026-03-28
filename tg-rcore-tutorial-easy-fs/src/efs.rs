@@ -147,4 +147,34 @@ impl EasyFileSystem {
             (block_id - self.data_area_start_block) as usize,
         )
     }
+
+    /// Given a disk inode block position, return its inode id
+    pub fn get_inode_id(&self, block_id: u32, block_offset: usize) -> u32 {
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
+        ((block_id - self.inode_area_start_block) * inodes_per_block)
+            + (block_offset as u32 / inode_size as u32)
+    }
+
+    /// Deallocate an inode and its associated data blocks, and free inode bitmap
+    pub fn dealloc_inode(&mut self, inode_id: u32) {
+        let (block_id, block_offset) = self.get_disk_inode_pos(inode_id);
+        // gather blocks to deallocate and clear inode metadata
+        let blocks = get_block_cache(block_id as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(block_offset, |disk_inode: &mut DiskInode| {
+                let blocks = disk_inode.clear_size(&self.block_device);
+                // clear inode metadata
+                // re-initialize inode metadata to default file and set nlink to 0
+                disk_inode.initialize(DiskInodeType::File);
+                disk_inode.nlink = 0;
+                blocks
+            });
+        // free all data blocks
+        for b in blocks {
+            self.dealloc_data(b);
+        }
+        // free inode bitmap
+        self.inode_bitmap.dealloc(&self.block_device, inode_id as usize);
+    }
 }

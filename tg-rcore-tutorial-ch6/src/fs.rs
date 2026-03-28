@@ -84,12 +84,25 @@ impl FSManager for FileSystem {
 
     /// 创建硬链接（TODO 练习题）
     fn link(&self, _src: &str, _dst: &str) -> isize {
-        unimplemented!()
+        // 如果源和目标相同，返回错误
+        if _src == _dst {
+            return -1;
+        }
+        if let Some(inode) = self.find(_src) {
+            // 若目标已存在，返回错误（本练习不处理覆盖行为）
+            if self.find(_dst).is_some() {
+                return -1;
+            }
+            let inode_id = inode.inode_id();
+            self.root.link(_dst, inode_id)
+        } else {
+            -1
+        }
     }
 
     /// 删除硬链接（TODO 练习题）
     fn unlink(&self, _path: &str) -> isize {
-        unimplemented!()
+        self.root.unlink(_path)
     }
 }
 

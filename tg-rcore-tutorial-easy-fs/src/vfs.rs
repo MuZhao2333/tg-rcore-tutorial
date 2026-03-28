@@ -139,6 +139,22 @@ impl Inode {
         // release efs lock automatically by compiler
     }
 
+    /// Return the inode number of this Inode
+    pub fn inode_id(&self) -> u32 {
+        let fs = self.fs.lock();
+        fs.get_inode_id(self.block_id as u32, self.block_offset)
+    }
+
+    /// Return whether this inode is a directory
+    pub fn is_dir(&self) -> bool {
+        self.read_disk_inode(|disk_inode| disk_inode.is_dir())
+    }
+
+    /// Return nlink count
+    pub fn nlink(&self) -> u32 {
+        self.read_disk_inode(|disk_inode| disk_inode.nlink)
+    }
+
     /// List inodes by id under current inode
     pub fn readdir(&self) -> Vec<String> {
         let _fs = self.fs.lock();
@@ -186,5 +202,80 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+
+    /// Create a directory entry pointing to an existing inode id
+    /// This will append a dirent under current directory and increase the target inode's nlink.
+    pub fn link(&self, name: &str, inode_id: u32) -> isize {
+        let mut fs = self.fs.lock();
+        // append dirent
+        self.modify_disk_inode(|root_inode| {
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            let dirent = DirEntry::new(name, inode_id);
+            root_inode.write_at(file_count * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+        });
+        // increase nlink on target inode
+        let (t_block, t_off) = fs.get_disk_inode_pos(inode_id);
+        get_block_cache(t_block as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(t_off, |disk_inode: &mut DiskInode| {
+                disk_inode.nlink = disk_inode.nlink.wrapping_add(1);
+            });
+        block_cache_sync_all();
+        0
+    }
+
+    /// Remove a directory entry by name. If found, decrement target inode nlink and
+    /// deallocate the inode if nlink reaches zero. Returns 0 on success, -1 if not found.
+    pub fn unlink(&self, name: &str) -> isize {
+        // collect entries
+        let mut entries: Vec<(String, u32)> = Vec::new();
+        self.read_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                entries.push((String::from(dirent.name()), dirent.inode_number()));
+            }
+        });
+        if let Some(idx) = entries.iter().position(|(n, _)| n == name) {
+            let inode_id = entries[idx].1;
+            entries.remove(idx);
+            // rewrite directory with remaining entries
+            let mut fs = self.fs.lock();
+            self.modify_disk_inode(|root_inode| {
+                let dealloced = root_inode.clear_size(&self.block_device);
+                for b in dealloced.into_iter() {
+                    fs.dealloc_data(b);
+                }
+                let new_size = (entries.len() * DIRENT_SZ) as u32;
+                self.increase_size(new_size, root_inode, &mut fs);
+                for (i, (n, id)) in entries.iter().enumerate() {
+                    let dirent = DirEntry::new(n, *id);
+                    root_inode.write_at(i * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+                }
+            });
+            // decrease nlink on target inode
+            let (t_block, t_off) = fs.get_disk_inode_pos(inode_id);
+            let nlink_after = get_block_cache(t_block as usize, Arc::clone(&self.block_device))
+                .lock()
+                .modify(t_off, |disk_inode: &mut DiskInode| {
+                    disk_inode.nlink = disk_inode.nlink.saturating_sub(1);
+                    disk_inode.nlink
+                });
+            // if nlink becomes zero, deallocate inode and its data blocks
+            if nlink_after == 0 {
+                fs.dealloc_inode(inode_id);
+            }
+            block_cache_sync_all();
+            0
+        } else {
+            -1
+        }
     }
 }
