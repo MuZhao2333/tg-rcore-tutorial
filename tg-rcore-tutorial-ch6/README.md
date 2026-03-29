@@ -2,8 +2,8 @@
 # 复现
 1. 通过crates.io：
    ```bash
-    cargo clone Chenzt23-tg-rcore-tutorial-ch6
-    cd Chenzt23-tg-rcore-tutorial-ch6
+    cargo clone chenzt23-tg-rcore-tutorial-ch6
+    cd chenzt23-tg-rcore-tutorial-ch6
     bash test.sh all
     ```
 2. 通过github：
