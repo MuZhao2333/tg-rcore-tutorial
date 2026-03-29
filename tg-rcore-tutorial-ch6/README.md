@@ -1,3 +1,17 @@
+### 陈子陶 2023012157
+# 复现
+1. 通过crates.io：
+   ```bash
+    cargo clone Chenzt23-tg-rcore-tutorial-ch6
+    cd Chenzt23-tg-rcore-tutorial-ch6
+    bash test.sh all
+    ```
+2. 通过github：
+    ```bash
+     git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
+     cd tg-rcore-tutorial/tg-rcore-tutorial-ch6
+     bash test.sh all
+    ```
 # 第六章：文件系统
 
 本章在第五章"进程管理"的基础上，引入了 **文件系统** 支持。用户程序不再嵌入内核镜像，而是存放在 **磁盘镜像**（fs.img）中，内核通过 **VirtIO 块设备驱动** 和 **easy-fs 文件系统** 按名称加载和执行程序。同时，进程拥有了**文件描述符表**，可以通过 `open`/`close`/`read`/`write` 等标准接口操作文件。
