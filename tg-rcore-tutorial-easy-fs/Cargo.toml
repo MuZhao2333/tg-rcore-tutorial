@@ -1,5 +1,5 @@
 [package]
-name = "Chenzt23-tg-rcore-tutorial-easy-fs"
+name = "chenzt23-tg-rcore-tutorial-easy-fs"
 description = "A simple filesystem implementation for rCore tutorial OS."
 version = "0.0.1-preview.1"
 edition = "2024"
