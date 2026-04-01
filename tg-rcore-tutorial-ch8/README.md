@@ -1,3 +1,18 @@
+### 陈子陶 2023012157
+# 复现
+1. 通过crates.io：
+   ```bash
+    cargo clone chenzt23-tg-rcore-tutorial-ch8
+    cd chenzt23-tg-rcore-tutorial-ch8
+    bash test.sh all
+    ```
+2. 通过github：
+    ```bash
+     git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
+     cd tg-rcore-tutorial/tg-rcore-tutorial-ch8
+     bash test.sh all
+    ```
+
 # 第八章：并发
 
 本章在第七章"进程间通信与信号"的基础上，引入了两大核心机制：

@@ -1,5 +1,6 @@
 use super::UPIntrFreeCell;
 use alloc::collections::VecDeque;
+use alloc::vec::Vec;
 use tg_task_manage::ThreadId;
 
 /// Mutex trait
@@ -8,6 +9,10 @@ pub trait Mutex: Sync + Send {
     fn lock(&self, tid: ThreadId) -> bool;
     /// 当前线程释放锁，并唤醒某个阻塞在这个锁上的线程
     fn unlock(&self) -> Option<ThreadId>;
+    /// 返回当前持有者（如果有）
+    fn owner(&self) -> Option<ThreadId>;
+    /// 返回当前等待队列的一个副本
+    fn wait_queue_iter(&self) -> Vec<ThreadId>;
 }
 
 /// MutexBlocking
@@ -18,6 +23,8 @@ pub struct MutexBlocking {
 /// MutexBlockingInner
 pub struct MutexBlockingInner {
     locked: bool,
+    /// 当前持有锁的线程（如果有）
+    owner: Option<ThreadId>,
     wait_queue: VecDeque<ThreadId>,
 }
 
@@ -29,6 +36,7 @@ impl MutexBlocking {
             inner: unsafe {
                 UPIntrFreeCell::new(MutexBlockingInner {
                     locked: false,
+                    owner: None,
                     wait_queue: VecDeque::new(),
                 })
             },
@@ -48,6 +56,7 @@ impl Mutex for MutexBlocking {
         } else {
             // 锁空闲：直接占有。
             mutex_inner.locked = true;
+            mutex_inner.owner = Some(tid);
             true
         }
     }
@@ -57,10 +66,21 @@ impl Mutex for MutexBlocking {
         assert!(mutex_inner.locked);
         if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
             // 注意：这里不清 locked，语义是“把锁转交给被唤醒线程”。
+            // 将 owner 指派给被唤醒的线程
+            mutex_inner.owner = Some(waking_task);
             Some(waking_task)
         } else {
             mutex_inner.locked = false;
+            mutex_inner.owner = None;
             None
         }
+    }
+    fn owner(&self) -> Option<ThreadId> {
+        let inner = self.inner.exclusive_access();
+        inner.owner
+    }
+    fn wait_queue_iter(&self) -> Vec<ThreadId> {
+        let inner = self.inner.exclusive_access();
+        inner.wait_queue.iter().cloned().collect()
     }
 }

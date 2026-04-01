@@ -737,7 +737,9 @@ mod impls {
             let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
             let sem = Arc::clone(current_proc.semaphore_list[sem_id].as_ref().unwrap());
-            if let Some(tid) = sem.up() {
+            let current = unsafe { (*processor).current().unwrap() };
+            let tid = current.tid;
+            if let Some(tid) = sem.up(tid) {
                 unsafe { (*processor).re_enque(tid); }
             }
             0
@@ -750,6 +752,107 @@ mod impls {
             let tid = current.tid;
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
             let sem = Arc::clone(current_proc.semaphore_list[sem_id].as_ref().unwrap());
+            // 死锁检测（Banker's-like 检测，基于每个信号量的 alloc_map 和 wait_queue）
+            if current_proc.deadlock_detect {
+                // 构建线程集合
+                let mut tids: Vec<usize> = Vec::new();
+                // 收集 alloc_map keys 和 wait_queue keys
+                for s in current_proc.semaphore_list.iter().flatten() {
+                    let inner = s.inner.exclusive_access();
+                    for (t, _) in inner.alloc_map.iter() {
+                        let id = t.get_usize(); if !tids.contains(&id) { tids.push(id); }
+                    }
+                    for t in inner.wait_queue.iter() {
+                        let id = t.get_usize(); if !tids.contains(&id) { tids.push(id); }
+                    }
+                }
+                let req_id = tid.get_usize(); if !tids.contains(&req_id) { tids.push(req_id); }
+
+                // 资源类型数 m
+                let m = current_proc.semaphore_list.len();
+                // Build Available and Allocation matrices
+                let mut available: Vec<isize> = Vec::new();
+                for s in current_proc.semaphore_list.iter() {
+                    if let Some(s) = s {
+                        let inner = s.inner.exclusive_access();
+                        available.push(if inner.count > 0 { inner.count } else { 0 });
+                    } else { available.push(0); }
+                }
+
+                // allocation: tids.len() x m
+                let mut allocation: Vec<Vec<usize>> = Vec::new();
+                allocation.resize(tids.len(), Vec::new());
+                for row in allocation.iter_mut() { row.resize(m, 0); }
+
+                // need (pending waits): count occurrences in wait_queue
+                let mut need: Vec<Vec<usize>> = Vec::new();
+                need.resize(tids.len(), Vec::new());
+                for row in need.iter_mut() { row.resize(m, 0); }
+
+                // fill allocation and need from snapshot
+                for (j, s_opt) in current_proc.semaphore_list.iter().enumerate() {
+                    if let Some(s) = s_opt {
+                        let inner = s.inner.exclusive_access();
+                        // alloc_map
+                        for (t, c) in inner.alloc_map.iter() {
+                            let id = t.get_usize();
+                            if let Some(pos) = tids.iter().position(|x| *x == id) {
+                                allocation[pos][j] = *c;
+                            }
+                        }
+                        // wait_queue
+                        for t in inner.wait_queue.iter() {
+                            let id = t.get_usize();
+                            if let Some(pos) = tids.iter().position(|x| *x == id) {
+                                need[pos][j] += 1;
+                            }
+                        }
+                    }
+                }
+
+                // 当前请求：把请求视为对 need 的一次增加（如果尚未在 wait_queue 中）
+                if let Some(pos) = tids.iter().position(|x| *x == req_id) {
+                    need[pos][sem_id] += 1;
+                }
+
+                // 安全性检查（Banker's safety algorithm）
+                let mut work: Vec<isize> = available.clone();
+                let mut finish: Vec<bool> = vec![false; tids.len()];
+                // 线程不在任何分配且不需资源的，可以直接标记为完成
+                for i in 0..tids.len() {
+                    let mut zero_alloc = true;
+                    for j in 0..m { if allocation[i][j] != 0 { zero_alloc = false; break; } }
+                    let mut zero_need = true;
+                    for j in 0..m { if need[i][j] != 0 { zero_need = false; break; } }
+                    if zero_alloc && zero_need { finish[i] = true; }
+                }
+
+                let mut progress = true;
+                while progress {
+                    progress = false;
+                    for i in 0..tids.len() {
+                        if finish[i] { continue; }
+                        // check if need[i] <= work
+                        let mut ok = true;
+                        for j in 0..m {
+                            if (need[i][j] as isize) > work[j] { ok = false; break; }
+                        }
+                        if ok {
+                            // simulate completion: work += allocation[i]
+                            for j in 0..m { work[j] += allocation[i][j] as isize; }
+                            finish[i] = true;
+                            progress = true;
+                        }
+                    }
+                }
+
+                let all_finished = finish.iter().all(|x| *x);
+                if !all_finished {
+                    return -(0xDEAD as isize);
+                }
+            }
+
+            // 执行真实的 down 操作
             if !sem.down(tid) { -1 } else { 0 }
         }
 
@@ -788,6 +891,60 @@ mod impls {
             let tid = current.tid;
             let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
             let mutex = Arc::clone(current_proc.mutex_list[mutex_id].as_ref().unwrap());
+            // 死锁检测（wait-for graph cycle detection）
+            if current_proc.deadlock_detect {
+                // 构建依赖图：从等待线程 -> 持有线程
+                let mut adj: Vec<(usize, Vec<usize>)> = Vec::new();
+                // helper to ensure node exists
+                let ensure = |vec: &mut Vec<(usize, Vec<usize>)>, id: usize| {
+                    if vec.iter().find(|(x, _)| *x == id).is_none() { vec.push((id, Vec::new())); }
+                };
+                for m_opt in current_proc.mutex_list.iter().flatten() {
+                    let owner_opt = m_opt.owner();
+                    if let Some(owner) = owner_opt {
+                        let owner_id = owner.get_usize();
+                        for w in m_opt.wait_queue_iter().into_iter() {
+                            let wid = w.get_usize();
+                            ensure(&mut adj, wid);
+                            if let Some((_, vec)) = adj.iter_mut().find(|(x, _)| *x == wid) {
+                                vec.push(owner_id);
+                            }
+                        }
+                    }
+                }
+                // add prospective edge for this request
+                if let Some(owner) = current_proc.mutex_list[mutex_id].as_ref().unwrap().owner() {
+                    let owner_id = owner.get_usize();
+                    let req_id = tid.get_usize();
+                    ensure(&mut adj, req_id);
+                    if let Some((_, vec)) = adj.iter_mut().find(|(x, _)| *x == req_id) {
+                        vec.push(owner_id);
+                    }
+                } else {
+                    // 无持有者，直接可以获得锁
+                    return if !mutex.lock(tid) { -1 } else { 0 };
+                }
+
+                // DFS 寻找从请求节点回到自身的环
+                let start = tid.get_usize();
+                let mut stack: Vec<usize> = Vec::new();
+                let mut visited: Vec<usize> = Vec::new();
+                stack.push(start);
+                let mut found_cycle = false;
+                while let Some(u) = stack.pop() {
+                    if visited.contains(&u) { continue; }
+                    visited.push(u);
+                    if let Some((_, neigh)) = adj.iter().find(|(x, _)| *x == u) {
+                        for &v in neigh.iter() {
+                            if v == start { found_cycle = true; break; }
+                            if !visited.contains(&v) { stack.push(v); }
+                        }
+                    }
+                    if found_cycle { break; }
+                }
+                if found_cycle { return -(0xDEAD as isize); }
+            }
+
             if !mutex.lock(tid) { -1 } else { 0 }
         }
 
@@ -834,8 +991,13 @@ mod impls {
 
         /// 死锁检测（TODO 练习题）
         fn enable_deadlock_detect(&self, _caller: Caller, is_enable: i32) -> isize {
-            tg_console::log::info!("enable_deadlock_detect: is_enable = {is_enable}, not implemented");
-            -1
+            let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
+            let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
+            match is_enable {
+                0 => { current_proc.deadlock_detect = false; 0 }
+                1 => { current_proc.deadlock_detect = true; 0 }
+                _ => -1,
+            }
         }
     }
 }
