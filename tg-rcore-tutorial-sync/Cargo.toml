@@ -5,7 +5,7 @@ version = "0.0.1-preview.1"
 edition = "2024"
 aauthors = ["Zitao Chen <chen-zt23@mails.tsinghua.edu.cn>"]
 repository = "https://github.com/MuZhao2333/tg-rcore-tutorial/"
-homepage = "repository = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/test/tg-rcore-tutorial-sync"
+homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/test/tg-rcore-tutorial-sync"
 documentation = "https://docs.rs/tg-rcore-tutorial-sync"
 license = "GPL-3.0"
 readme = "README.md"
