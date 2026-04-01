@@ -43,7 +43,7 @@ tg-easy-fs = { package = "chenzt23-tg-rcore-tutorial-easy-fs", path = "../tg-rco
 
 tg-signal = { package = "tg-rcore-tutorial-signal", path = "../tg-rcore-tutorial-signal", version = "0.4.8" }
 tg-signal-impl = { package = "tg-rcore-tutorial-signal-impl", path = "../tg-rcore-tutorial-signal-impl", version = "0.4.8" }
-tg-sync = { package = "tg-rcore-tutorial-sync", path = "../tg-rcore-tutorial-sync", version = "0.4.8" }
+tg-sync = { package = "chenzt23-tg-rcore-tutorial-sync", path = "../tg-rcore-tutorial-sync", version = "0.0.1-preview.1" }
 
 [build-dependencies]
 tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }
