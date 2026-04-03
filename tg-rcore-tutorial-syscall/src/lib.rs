@@ -21,6 +21,21 @@ pub use io::*;
 pub use tg_signal_defs::{SignalAction, SignalNo, MAX_SIG};
 pub use time::*;
 
+/// framebuffer 信息结构
+#[repr(C)]
+pub struct FbInfo {
+    /// framebuffer 物理地址
+    pub ptr: usize,
+    /// 宽度（像素）
+    pub width: u32,
+    /// 高度（像素）
+    pub height: u32,
+    /// 行间距（字节）
+    pub pitch: u32,
+    /// 像素格式：0=BGR888
+    pub format: u32,
+}
+
 #[cfg(feature = "user")]
 mod user;
 

@@ -5,14 +5,14 @@ target = "riscv64gc-unknown-none-elf"
 
 # QEMU 运行器配置
 # cargo run 时自动调用此命令执行编译产物
-# 等价于：qemu-system-riscv64 -machine virt -nographic -bios none -kernel <编译产物>
 [target.riscv64gc-unknown-none-elf]
 runner = [
     "qemu-system-riscv64",
-    "-machine", "virt",       # 使用 QEMU virt 虚拟平台
-    "-nographic",             # 无图形界面，输出重定向到终端
-    "-bios", "none",          # 不加载外部 BIOS/SBI 固件（tg-sbi 内建）
-    "-kernel",                # 后接 ELF 可执行文件路径（由 cargo 自动填充）
+    "-machine", "virt",            # 使用 QEMU virt 虚拟平台
+    "-bios", "none",               # 不加载外部 BIOS/SBI 固件（tg-sbi 内建）
+    "-device", "virtio-gpu-device", # 启用 VirtIO GPU 设备（为用户程序提供）
+    "-serial", "mon:stdio",
+    "-kernel",                     # 后接 ELF 可执行文件路径（由 cargo 自动填充）
 ]
 
 # tg-user 用户态库的配置，由 build.rs 读取

@@ -30,7 +30,9 @@
 #[macro_use]
 extern crate tg_console;
 
-// 本地模块：Console 和 SyscallContext 的实现
+// 本地模块：Console 和 SyscallContext 的实现、GPU 驱动
+mod gpu;
+
 use impls::{Console, SyscallContext};
 // riscv 库：访问 RISC-V 控制状态寄存器（CSR），如 scause
 use riscv::register::*;
@@ -42,6 +44,11 @@ use tg_kernel_context::LocalContext;
 use tg_sbi;
 // 系统调用相关：调用者信息、系统调用 ID
 use tg_syscall::{Caller, SyscallId};
+
+// ========== 全局分配器 ==========
+
+#[global_allocator]
+static GLOBAL: gpu::BumpAllocator = gpu::BumpAllocator;
 
 // ========== 启动相关 ==========
 
@@ -84,64 +91,172 @@ extern "C" fn rust_main() -> ! {
     tg_console::set_log_level(option_env!("LOG"));
     tg_console::test_log();
 
-    // 第三步：初始化系统调用处理（注册 IO 和 Process 的实现）
-    tg_syscall::init_io(&SyscallContext);
-    tg_syscall::init_process(&SyscallContext);
+    // 第三步：初始化 GPU 设备
+    log::info!("Initializing GPU device...");
+    let (fb_ptr, fb_len, fb_width, fb_height) = gpu::init_gpu();
+    log::info!("Framebuffer: ptr=0x{:x}, len={}, {}x{}", fb_ptr, fb_len, fb_width, fb_height);
 
-    // 第四步：批处理——依次加载并运行每个用户程序
-    for (i, app) in tg_linker::AppMeta::locate().iter().enumerate() {
-        let app_base = app.as_ptr() as usize;
-        log::info!("load app{i} to {app_base:#x}");
+    // 第四步：初始化系统调用处理（注册 IO、Process 和 Display 的实现）
+    log::info!("Initializing syscalls...");
+    tg_syscall::init_io(&SyscallContext);
+    log::info!("IO syscalls initialized");
+    tg_syscall::init_process(&SyscallContext);
+    log::info!("Process syscalls initialized");
+    tg_syscall::init_display(&SyscallContext);
+    log::info!("Display syscalls initialized");
+
+    // 第五步：批处理——依次加载并运行每个用户程序
+    log::info!("Starting batch processing...");
+    println!("\n✓✓✓ BATCH START ✓✓✓\n");
+
+    // 进一步的运行时诊断：保存 meta 指针以便在循环内比对原始位置与拷贝后的地址/数据
+    let diag_meta = tg_linker::AppMeta::locate();
+    let diag_p64 = diag_meta as *const _ as *const u64;
+    let diag_base = unsafe { *diag_p64.add(0) } as usize;
+    let diag_step = unsafe { *diag_p64.add(1) } as usize;
+    let diag_count = unsafe { *diag_p64.add(2) } as usize;
+    let diag_entries = unsafe { diag_p64.add(3) as *const usize };
+
+    for i in 0..diag_count {
+        println!("\n>>> APP{} START <<<", i);
+        log::info!("[ITER] begin iteration i={}", i);
+
+        // 原始嵌入位置与大小（由链接器 app table 指定）
+        let orig_pos = unsafe { *diag_entries.add(i) };
+        let orig_next = unsafe { *diag_entries.add(i + 1) };
+        let orig_size = orig_next.wrapping_sub(orig_pos);
+        let expected_base = diag_base.wrapping_add(i.wrapping_mul(diag_step));
+
+        // 如果 meta 指定了 base，则将应用拷贝到 base + i*step；否则直接使用嵌入位置
+        let app_base = if diag_base != 0 {
+            let dest = expected_base;
+            log::info!(
+                "[COPY] about to copy orig_pos=0x{:x} -> dest=0x{:x}, size={}",
+                orig_pos,
+                dest,
+                orig_size
+            );
+            unsafe {
+                // 分块拷贝，便于在长拷贝中打印进度定位挂起点
+                let mut remaining = orig_size;
+                let mut src = orig_pos as *const u8;
+                let mut dst_ptr = dest as *mut u8;
+                const CHUNK: usize = 4096;
+                let mut copied: usize = 0;
+                while remaining > 0 {
+                    let c = core::cmp::min(CHUNK, remaining);
+                    core::ptr::copy_nonoverlapping(src, dst_ptr, c);
+                    remaining -= c;
+                    copied += c;
+                    src = src.add(c);
+                    dst_ptr = dst_ptr.add(c);
+                    // 只打印第一次和每 64 KiB 的进度，避免日志过多
+                    if copied == c || (copied % 65536) == 0 {
+                        log::info!("[COPY] progress i={} copied {} bytes", i, copied);
+                    }
+                }
+
+                // 仅清零 slot 的前 4 KiB 作为占位，完整清零会写入大量内存，暂时避免
+                if diag_step > orig_size {
+                    let z = core::cmp::min(4096, diag_step - orig_size);
+                    core::slice::from_raw_parts_mut((dest + orig_size) as *mut u8, z).fill(0);
+                }
+            }
+            log::info!("[COPY] done copying to 0x{:x}", dest);
+            dest
+        } else {
+            orig_pos
+        };
+
+        log::info!("load app{} to {:#x}, size={}", i, app_base, orig_size);
+        log::info!("[DIAG2] app{}: orig_pos=0x{:x}, orig_size={}, expected_base=0x{:x}", i, orig_pos, orig_size, expected_base);
+
+        // 读取首若干字节并打印十六进制便于比较（最多 8 字节）
+        let first_n = core::cmp::min(8, orig_size);
+        let mut orig_word: u64 = 0;
+        let mut loaded_word: u64 = 0;
+        for j in 0..first_n {
+            let b = unsafe { *((orig_pos as *const u8).add(j)) } as u64;
+            orig_word |= b << (j * 8);
+            let lb = unsafe { *((app_base as *const u8).add(j)) } as u64;
+            loaded_word |= lb << (j * 8);
+        }
+        log::info!("[DIAG2] app{} first{}bytes: orig=0x{:x}, loaded=0x{:x}", i, first_n, orig_word, loaded_word);
 
         // 创建用户态上下文，入口地址为 app_base
-        // LocalContext::user() 会设置 sstatus.SPP = User，
-        // 使得 sret 后 CPU 进入 U-mode
         let mut ctx = LocalContext::user(app_base);
 
         // 分配用户栈（4 KiB），使用 MaybeUninit 避免不必要的零初始化
-        let mut user_stack: core::mem::MaybeUninit<[usize; 512]> =
-            core::mem::MaybeUninit::uninit();
+        let mut user_stack: core::mem::MaybeUninit<[usize; 512]> = core::mem::MaybeUninit::uninit();
         let user_stack_ptr = user_stack.as_mut_ptr() as *mut usize;
-        // 将用户栈顶地址写入上下文的 sp 寄存器
         *ctx.sp_mut() = unsafe { user_stack_ptr.add(512) } as usize;
+        log::info!("[CTX] sp set to 0x{:x}, entry=0x{:x}", *ctx.sp_mut(), app_base);
 
         // 循环执行用户程序，直到退出或出错
         loop {
-            // execute() 会：
-            // 1. 将当前上下文的寄存器恢复到 CPU
-            // 2. 执行 sret 切换到 U-mode 运行用户程序
-            // 3. 用户程序触发 Trap 后回到这里
+            log::info!("[EXEC] About to execute user program, pc=0x{:x}", ctx.pc());
             unsafe { ctx.execute() };
 
-            // 读取 scause 寄存器判断 Trap 原因
             use scause::{Exception, Trap};
-            match scause::read().cause() {
-                // 用户态系统调用（ecall from U-mode）
+            let cause = scause::read().cause();
+            log::debug!("[EXEC] Trap occurred: {:?}, pc=0x{:x}", cause, ctx.pc());
+            match cause {
                 Trap::Exception(Exception::UserEnvCall) => {
                     use SyscallResult::*;
+                    log::debug!("[EXEC] UserEnvCall: a7={}", ctx.a(7));
                     match handle_syscall(&mut ctx) {
-                        Done => continue,           // 系统调用处理完成，继续执行
-                        Exit(code) => log::info!("app{i} exit with code {code}"),
+                        Done => {
+                            log::debug!("[EXEC] Syscall handled, continuing");
+                            continue;
+                        }
+                        Exit(code) => {
+                            log::info!("[ INFO] app{} exit with code {}", i, code);
+                        }
                         Error(id) => {
-                            log::error!("app{i} call an unsupported syscall {}", id.0)
+                            log::error!("[EXEC] app{} call an unsupported syscall {}", i, id.0)
                         }
                     }
                 }
-                // 其他异常（如非法指令、页错误等）：杀死应用
-                trap => log::error!("app{i} was killed because of {trap:?}"),
+                trap => log::error!("[EXEC] app{} was killed because of {:?}", i, trap),
             }
-            // 清除指令缓存：因为下一个用户程序会被加载到相同的内存区域，
-            // 需要确保 i-cache 中不会残留旧的指令
             unsafe { core::arch::asm!("fence.i") };
             break;
         }
         // 防止编译器优化掉 user_stack
         let _ = core::hint::black_box(&user_stack);
+
+        // 运行结束后再次打印 AppMeta 与表项，检查是否被覆盖或改变
+        unsafe {
+            let m2 = tg_linker::AppMeta::locate();
+            let p2 = m2 as *const _ as *const u64;
+            let b2 = *p2 as usize;
+            let s2 = *p2.add(1) as usize;
+            let c2 = *p2.add(2) as usize;
+            log::info!("[DIAG_AFTER] AppMeta: base=0x{:x}, step=0x{:x}, count={}", b2, s2, c2);
+            let ent2 = p2.add(3) as *const usize;
+            for k in 0..(c2 + 1) {
+                let v2 = *ent2.add(k);
+                log::info!("[DIAG_AFTER] app_table[{}] = 0x{:x}", k, v2);
+            }
+        }
+
+        println!("<<< APP{} END >>>", i);
         println!();
     }
 
-    // 所有用户程序执行完毕，关机
-    tg_sbi::shutdown(false)
+    println!("\n✓✓✓ BATCH END ✓✓✓\n");
+
+    // 所有用户程序执行完毕 —— 进入调试空循环以保留 framebuffer 便于观察（临时调试用）。
+    log::info!("All apps finished — entering debug idle loop (no shutdown).");
+    loop {
+        // 在 RISC-V 真机/仿真上，尝试周期性刷新 GPU 并执行低功耗等待（wfi），
+        // 以便 SDL/虚拟 GPU 能够及时显示 framebuffer 内容。
+        #[cfg(target_arch = "riscv64")]
+        {
+            let _ = gpu::gpu_flush();
+            unsafe { core::arch::asm!("wfi"); }
+        }
+    }
 }
 
 // ========== panic 处理 ==========
@@ -176,6 +291,8 @@ fn handle_syscall(ctx: &mut LocalContext) -> SyscallResult {
     let id = ctx.a(7).into();
     // a0-a5 寄存器存放系统调用参数
     let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
+
+    tg_console::log::debug!("[SYSCALL] Handling syscall ID={}, args={:?}", ctx.a(7), args);
 
     match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
         Ret::Done(ret) => match id {
@@ -244,6 +361,50 @@ mod impls {
         #[inline]
         fn exit(&self, _caller: tg_syscall::Caller, _status: usize) -> isize {
             0
+        }
+    }
+
+    /// Display 系统调用实现：处理 get_fb_info 和 framebuffer_flush 系统调用
+    impl tg_syscall::Display for SyscallContext {
+        fn get_fb_info(
+            &self,
+            _caller: tg_syscall::Caller,
+            info_ptr: usize,
+        ) -> isize {
+            use tg_syscall::FbInfo;
+            tg_console::log::debug!("[SYSCALL] get_fb_info() called, info_ptr=0x{:x}", info_ptr);
+            let (width, height) = super::gpu::get_resolution();
+            let fb_ptr = super::gpu::get_framebuffer_ptr();
+
+            if fb_ptr == 0 {
+                tg_console::log::error!("[SYSCALL] Framebuffer not initialized");
+                return -1;
+            }
+
+            // 尝试获取真实的 pitch（字节/行），若不可用则回退为 width*4
+            let pitch_raw = super::gpu::get_framebuffer_pitch();
+            let pitch = if pitch_raw > 0 { pitch_raw as u32 } else { width * 4 };
+
+            tg_console::log::debug!("[SYSCALL] Returning framebuffer: ptr=0x{:x}, {}x{}, pitch={}", fb_ptr, width, height, pitch);
+            
+            let info = info_ptr as *mut FbInfo;
+            unsafe {
+                (*info).ptr = fb_ptr;
+                (*info).width = width;
+                (*info).height = height;
+                (*info).pitch = pitch; // bytes per line
+                (*info).format = 0; // BGR888
+            }
+
+            0  // 返回成功
+        }
+
+        fn framebuffer_flush(&self, _caller: tg_syscall::Caller) -> isize {
+            tg_console::log::debug!("[SYSCALL] framebuffer_flush() called");
+            // 调用GPU驱动刷新显示
+            let result = super::gpu::gpu_flush();
+            tg_console::log::debug!("[SYSCALL] framebuffer_flush() returned {}", result);
+            result
         }
     }
 }

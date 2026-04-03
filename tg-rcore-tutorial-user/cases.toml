@@ -1,6 +1,6 @@
 [ch2]
 base = 0x8040_0000
-step = 0
+step = 0x0020_0000
 cases = [
     "00hello_world",
     "01store_fault",
@@ -10,6 +10,13 @@ cases = [
     "08power_3",
     "09power_5",
     "10power_7",
+    "ch2_tangram_0",
+    "ch2_tangram_1",
+    "ch2_tangram_2",
+    "ch2_tangram_3",
+    "ch2_tangram_4",
+    "ch2_tangram_5",
+    "ch2_tangram_6",
 ]
 
 [ch3]

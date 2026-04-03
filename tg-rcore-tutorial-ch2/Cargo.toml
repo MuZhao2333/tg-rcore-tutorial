@@ -24,6 +24,8 @@ panic = "abort"
 
 [dependencies]
 riscv = "0.10.1"
+virtio-drivers = "0.1.0"
+spin = "0.9"
 
 tg-sbi = { package = "tg-rcore-tutorial-sbi", path = "../tg-rcore-tutorial-sbi", version = "0.4.8", features = ["nobios"] }
 tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }

@@ -176,6 +176,15 @@ pub trait Trace: Sync {
     }
 }
 
+pub trait Display: Sync {
+    fn get_fb_info(&self, caller: Caller, info_ptr: usize) -> isize {
+        unimplemented!()
+    }
+    fn framebuffer_flush(&self, caller: Caller) -> isize {
+        unimplemented!()
+    }
+}
+
 static PROCESS: Container<dyn Process> = Container::new();
 static IO: Container<dyn IO> = Container::new();
 static MEMORY: Container<dyn Memory> = Container::new();
@@ -185,6 +194,7 @@ static SIGNAL: Container<dyn Signal> = Container::new();
 static THREAD: Container<dyn Thread> = Container::new();
 static SYNC_MUTEX: Container<dyn SyncMutex> = Container::new();
 static TRACE: Container<dyn Trace> = Container::new();
+static DISPLAY: Container<dyn Display> = Container::new();
 
 #[inline]
 pub fn init_process(process: &'static dyn Process) {
@@ -229,6 +239,11 @@ pub fn init_sync_mutex(sync_mutex: &'static dyn SyncMutex) {
 #[inline]
 pub fn init_trace(trace: &'static dyn Trace) {
     TRACE.init(trace);
+}
+
+#[inline]
+pub fn init_display(display: &'static dyn Display) {
+    DISPLAY.init(display);
 }
 
 pub enum SyscallResult {
@@ -317,6 +332,12 @@ pub fn handle(caller: Caller, id: SyscallId, args: [usize; 6]) -> SyscallResult 
         Id::SETPRIORITY => SCHEDULING.call(id, |sched| sched.set_priority(caller, args[0] as _)),
         Id::BRK => PROCESS.call(id, |proc| proc.sbrk(caller, args[0] as _)),
         Id::PIPE2 => IO.call(id, |io| io.pipe(caller, args[0])),
+        Id::GET_FB_INFO => {
+            DISPLAY.call(id, |display| display.get_fb_info(caller, args[0]))
+        }
+        Id::FRAMEBUFFER_FLUSH => {
+            DISPLAY.call(id, |display| display.framebuffer_flush(caller))
+        }
         _ => SyscallResult::Unsupported(id),
     }
 }

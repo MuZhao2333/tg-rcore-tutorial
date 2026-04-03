@@ -338,6 +338,20 @@ pub fn pipe(pipe_fd: &mut [usize]) -> isize {
     unsafe { syscall1(SyscallId::PIPE2, pipe_fd.as_mut_ptr() as _) }
 }
 
+/// 获取 framebuffer 信息
+#[inline]
+pub fn get_fb_info(info: &mut crate::FbInfo) -> isize {
+    // SAFETY: info 是有效的可写内存
+    unsafe { syscall1(SyscallId::GET_FB_INFO, info as *mut _ as usize) }
+}
+
+/// 刷新 framebuffer 显示
+#[inline]
+pub fn framebuffer_flush() -> isize {
+    // SAFETY: 系统调用没有参数
+    unsafe { syscall0(SyscallId::FRAMEBUFFER_FLUSH) }
+}
+
 /// 这个模块包含调用系统调用的最小封装，用户可以直接使用这些函数调用自定义的系统调用。
 ///
 /// # Safety
