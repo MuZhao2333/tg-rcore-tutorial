@@ -175,6 +175,7 @@ cases = [
     "pipe_large_test",
     "ch8b_usertest",
     "user_shell",
+    "doom",
     "initproc",
 ]
 
@@ -300,5 +301,6 @@ cases = [
     "ch8_deadlock_sem2",
     "ch8_usertest",
     "user_shell",
+    "doom",
     "initproc",
 ]

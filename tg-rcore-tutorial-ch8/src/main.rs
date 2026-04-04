@@ -48,6 +48,8 @@
 
 /// 文件系统模块：easy-fs 封装 + 统一 Fd 枚举
 mod fs;
+/// GPU/VirtIO 显示驱动模块
+mod gpu;
 /// 进程与线程模块：Process（资源容器）和 Thread（执行单元）
 mod process;
 /// 处理器模块：PROCESSOR 全局管理器（PThreadManager）
@@ -157,8 +159,11 @@ impl KernelSpace {
 /// 内核地址空间全局实例
 static KERNEL_SPACE: KernelSpace = KernelSpace::new();
 
-/// VirtIO MMIO 设备地址范围
-pub const MMIO: &[(usize, usize)] = &[(0x1000_1000, 0x00_1000)];
+/// VirtIO MMIO 设备地址范围（覆盖多个设备槽位）
+pub const MMIO: &[(usize, usize)] = &[
+    (0x1000_1000, 0x00_1000), // Slot 0: block device
+    (0x1000_2000, 0x00_1000), // Slot 1: GPU
+];
 
 /// 内核主函数
 ///
@@ -200,6 +205,10 @@ extern "C" fn rust_main() -> ! {
     tg_syscall::init_signal(&SyscallContext);
     tg_syscall::init_thread(&SyscallContext);       // 本章新增：线程系统调用
     tg_syscall::init_sync_mutex(&SyscallContext);   // 本章新增：同步原语系统调用
+    // 步骤 9：GPU 显示初始化
+    let (fb_ptr, fb_len, fb_width, fb_height) = gpu::init_gpu();
+    log::info!("GPU initialized: ptr=0x{:x}, len={}, {}x{}", fb_ptr, fb_len, fb_width, fb_height);
+    tg_syscall::init_display(&SyscallContext);
     // 步骤 8：加载 initproc（返回 Process + Thread）
     let initproc = read_all(FS.open("initproc", OpenFlags::RDONLY).unwrap());
     if let Some((process, thread)) = Process::from_elf(ElfFile::new(initproc.as_slice()).unwrap()) {
@@ -365,6 +374,7 @@ mod impls {
     use tg_signal::SignalNo;
     use tg_sync::{Condvar, Mutex as MutexTrait, MutexBlocking, Semaphore};
     use tg_syscall::*;
+    use tg_syscall::Display;
     use tg_task_manage::{ProcId, ThreadId};
     use xmas_elf::ElfFile;
 
@@ -998,6 +1008,71 @@ mod impls {
                 1 => { current_proc.deadlock_detect = true; 0 }
                 _ => -1,
             }
+        }
+    }
+
+    /// Display 系统调用（Framebuffer 支持）
+    impl Display for SyscallContext {
+        fn get_fb_info(&self, _caller: Caller, info_ptr: usize) -> isize {
+            const WRITABLE: VmFlags<Sv39> = build_flags("W_V");
+            let current = PROCESSOR.get_mut().get_current_proc().unwrap();
+            if let Some(ptr) = current.address_space.translate::<u8>(VAddr::new(info_ptr), WRITABLE) {
+                unsafe {
+                    // FbInfo layout: ptr(usize), width(u32), height(u32), pitch(u32), format(u32)
+                    // Total size: 8 + 4 + 4 + 4 + 4 = 24 bytes
+                    let info_ptr = ptr.as_ptr() as *mut crate::gpu::FbInfo;
+                    (*info_ptr).ptr = crate::gpu::get_framebuffer_ptr();
+                    (*info_ptr).width = crate::gpu::get_resolution().0;
+                    (*info_ptr).height = crate::gpu::get_resolution().1;
+                    (*info_ptr).pitch = crate::gpu::get_framebuffer_pitch() as u32;
+                    (*info_ptr).format = 0; // BGR888
+                }
+                0
+            } else {
+                log::error!("get_fb_info: ptr not writeable");
+                -1
+            }
+        }
+
+        fn framebuffer_flush(&self, _caller: Caller) -> isize {
+            crate::gpu::gpu_flush()
+        }
+
+        fn fb_blit(&self, _caller: Caller, src: usize, len: usize) -> isize {
+            use crate::gpu::DOOM_BLIT_BYTES;
+            use tg_kernel_vm::page_table::MmuMeta;
+
+            if len < DOOM_BLIT_BYTES {
+                log::error!("fb_blit: len {len} < {DOOM_BLIT_BYTES}");
+                return -1;
+            }
+
+            let current = PROCESSOR.get_mut().get_current_proc().unwrap();
+            let page_size = 1usize << Sv39::PAGE_BITS;
+            let mut buf = alloc::vec![0u8; DOOM_BLIT_BYTES];
+            let mut va = src;
+            let mut copied = 0usize;
+
+            while copied < DOOM_BLIT_BYTES {
+                let page_remain = page_size - (va % page_size);
+                let chunk = page_remain.min(DOOM_BLIT_BYTES - copied);
+                if let Some(ptr) = current.address_space.translate(VAddr::new(va), READABLE) {
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            ptr.as_ptr(),
+                            buf.as_mut_ptr().add(copied),
+                            chunk,
+                        );
+                    }
+                    copied += chunk;
+                    va += chunk;
+                } else {
+                    log::error!("fb_blit: unreadable user range at va=0x{va:x}");
+                    return -1;
+                }
+            }
+
+            crate::gpu::gpu_blit_from_slice(&buf)
         }
     }
 }

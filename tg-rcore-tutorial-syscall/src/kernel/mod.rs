@@ -183,6 +183,9 @@ pub trait Display: Sync {
     fn framebuffer_flush(&self, caller: Caller) -> isize {
         unimplemented!()
     }
+    fn fb_blit(&self, caller: Caller, src: usize, len: usize) -> isize {
+        unimplemented!()
+    }
 }
 
 static PROCESS: Container<dyn Process> = Container::new();
@@ -337,6 +340,9 @@ pub fn handle(caller: Caller, id: SyscallId, args: [usize; 6]) -> SyscallResult 
         }
         Id::FRAMEBUFFER_FLUSH => {
             DISPLAY.call(id, |display| display.framebuffer_flush(caller))
+        }
+        Id::FB_BLIT => {
+            DISPLAY.call(id, |display| display.fb_blit(caller, args[0], args[1]))
         }
         _ => SyscallResult::Unsupported(id),
     }

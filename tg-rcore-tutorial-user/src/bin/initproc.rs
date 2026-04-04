@@ -20,7 +20,7 @@ extern "C" fn main() -> i32 {
             "-6" => "ch6b_usertest",
             "-7" => "ch7b_usertest",
             "-8" => "ch8b_usertest",
-            _ => "user_shell",
+            _ => "doom", // 默认运行 doom demo
         };
         exec(target);
     } else {

@@ -1,4 +1,4 @@
-﻿// Copied from <https://git.musl-libc.org/cgit/musl/tree/arch/riscv64/bits/syscall.h.in>.
+// Copied from <https://git.musl-libc.org/cgit/musl/tree/arch/riscv64/bits/syscall.h.in>.
 
 #define __NR_io_setup 0
 #define __NR_io_destroy 1
@@ -319,6 +319,7 @@
 //
 #define __NR_get_fb_info 1100
 #define __NR_framebuffer_flush 1101
+#define __NR_fb_blit 1102
 
 #define __NR_spawn 400
 #define __NR_trace 410

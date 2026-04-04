@@ -352,6 +352,17 @@ pub fn framebuffer_flush() -> isize {
     unsafe { syscall0(SyscallId::FRAMEBUFFER_FLUSH) }
 }
 
+/// 将本地缓冲区内容复制到 GPU 帧缓冲
+///
+/// - `src`: 用户缓冲区地址（DOOM 的本地像素缓冲区）
+/// - `len`: 缓冲区字节数
+/// - 返回: 成功复制的字节数，负数表示错误
+#[inline]
+pub fn fb_blit(src: usize, len: usize) -> isize {
+    // SAFETY: src 必须是有效的用户缓冲区指针，len 不能超过实际缓冲区大小
+    unsafe { syscall2(SyscallId::FB_BLIT, src, len) }
+}
+
 /// 这个模块包含调用系统调用的最小封装，用户可以直接使用这些函数调用自定义的系统调用。
 ///
 /// # Safety
