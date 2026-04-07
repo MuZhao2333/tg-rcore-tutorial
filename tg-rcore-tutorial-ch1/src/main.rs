@@ -9,6 +9,14 @@
 //! - 裸函数（naked function）：不生成函数序言/尾声，可在无栈环境下执行
 //! - SBI（Supervisor Binary Interface）：S 态软件向 M 态固件请求服务的标准接口
 //!
+//! ## 扩展：时钟中断
+//!
+//! 在第一章的基础上，我们还展示了**时钟中断**的处理机制：
+//!
+//! - **时钟中断**：由硬件计时器触发，是实现抢占式调度的基础
+//! - **CSR（Control and Status Register）**：RISC-V 控制状态寄存器，用于配置中断和查询中断原因
+//! - **定时器设置**：通过 SBI 调用 `set_timer` 设置下一次中断时间
+//!
 //! 教程阅读建议：
 //!
 //! - 先看 `_start`：理解无运行时情况下的最小启动流程；
@@ -27,6 +35,17 @@
 // 引入 SBI 调用库，提供 console_putchar（输出字符）和 shutdown（关机）功能
 // 启用 nobios 特性后，tg_sbi 内建了 M-mode 启动代码，无需外部 SBI 固件
 use tg_sbi::{console_putchar, shutdown};
+
+// 引入 RISC-V 寄存器访问库，提供 CSR 操作（用于时钟中断）
+use riscv::register::{sie, sstatus, time};
+
+// ========== 常量定义 ==========
+
+/// 时钟中断间隔：每 10,000,000 个时钟周期触发一次
+///
+/// QEMU virt 平台的时钟频率为 10 MHz（10,000,000 Hz），
+/// 因此这个设置大约每秒触发一次时钟中断。
+const TIMER_INTERVAL: u64 = 10_000_000;
 
 /// S 态程序入口点。
 ///
@@ -58,15 +77,117 @@ unsafe extern "C" fn _start() -> ! {
     )
 }
 
-/// S 态主函数：打印 "Hello, world!" 并关机。
+/// S 态主函数：初始化时钟中断，然后进入主循环。
 ///
-/// 通过 SBI 的 `console_putchar` 逐字节输出字符串，
-/// 然后调用 `shutdown` 正常关机退出 QEMU。
+/// 与简单的 "Hello, world!" 不同，这里进入一个无限循环，
+/// 等待并处理时钟中断。每次中断时输出一个字符，形成"tick-tock"的定时输出效果。
 extern "C" fn rust_main() -> ! {
-    for c in b"Hello, world!\n" {
+    // ========== 调试：输出初始化信息 ==========
+    for c in b"Init...\n" {
         console_putchar(*c);
     }
-    shutdown(false) // false 表示正常关机
+
+    // 第一步：使能 S-mode 全局中断（SIE 位）
+    // 这允许 CPU 响应各种 S-mode 中断，包括时钟中断
+    // SAFETY: 设置 sstatus CSR 是 S-mode 下允许的操作
+    unsafe { sstatus::set_sie() };
+
+    // 调试：检查 sstatus（使用 csrr 指令直接读取）
+    for c in b"sstatus: " { console_putchar(*c); }
+    print_hex(read_sstatus());
+
+    // 第二步：使能 S-mode 时钟中断
+    // 这告诉硬件：允许时钟中断传递到 S-mode
+    // 注意：中断委托在 M-mode 的 m_entry.asm 中配置
+    // SAFETY: 设置 sie CSR 是 S-mode 下允许的操作，用于使能时钟中断
+    unsafe { sie::set_stimer() };
+
+    // 调试：检查 sie（使用 csrr 指令直接读取）
+    for c in b"sie: " { console_putchar(*c); }
+    print_hex(read_sie());
+
+    // 第三步：设置第一次时钟中断（使用较小的间隔以便测试）
+    use tg_sbi::set_timer;
+    let current_time = time::read64() as usize;
+    for c in b"time: " { console_putchar(*c); }
+    print_hex(current_time);
+
+    // 设置一个较短的时间间隔（1秒 = 10_000_000 个周期）
+    let next_interrupt = current_time + TIMER_INTERVAL as usize;
+    for c in b"mtimecmp: " { console_putchar(*c); }
+    print_hex(next_interrupt);
+    set_timer(next_interrupt as u64);
+
+    for c in b"Wait for interrupt...\n" { console_putchar(*c); }
+
+    // 第四步：进入主循环
+    // 使用轮询方式检测定时器中断（调试用）
+    // 记录下一次中断时间，与当前时间比较来判断是否到期
+    let mut next_time = current_time + TIMER_INTERVAL as usize;
+    let mut counter = 0usize;
+    loop {
+        let current = time::read64() as usize;
+        if current >= next_time {
+            // 定时器到期了
+            for c in b"\nTimer! " { console_putchar(*c); }
+            print_hex(current);
+
+            // 设置下一次中断
+            next_time = current + TIMER_INTERVAL as usize;
+            set_timer(next_time as u64);
+            counter += 1;
+            if counter >= 5 {
+                for c in b"\nDone (5 ticks)\n" { console_putchar(*c); }
+                shutdown(false);
+            }
+        }
+    }
+}
+
+/// 打印 16 进制数字（简化版，不使用格式化宏）
+fn print_hex(val: usize) {
+    // 输出 "0x" 前缀
+    console_putchar(b'0');
+    console_putchar(b'x');
+
+    // 计算有多少位（最多 16 位）
+    if val == 0 {
+        console_putchar(b'0');
+        console_putchar(b'\n');
+        return;
+    }
+
+    // 找出最高位的位置
+    let mut digits = [0u8; 16];
+    let mut count = 0;
+    let mut v = val;
+    while v > 0 {
+        digits[count] = (v & 0xF) as u8;
+        v >>= 4;
+        count += 1;
+    }
+
+    // 反向输出
+    let hex_chars = b"0123456789abcdef";
+    while count > 0 {
+        count -= 1;
+        console_putchar(hex_chars[digits[count] as usize]);
+    }
+    console_putchar(b'\n');
+}
+
+/// 使用内联汇编读取 sstatus CSR (0x100)
+fn read_sstatus() -> usize {
+    let val: usize;
+    unsafe { core::arch::asm!("csrr {0}, sstatus", out(reg) val); }
+    val
+}
+
+/// 使用内联汇编读取 sie CSR (0x104)
+fn read_sie() -> usize {
+    let val: usize;
+    unsafe { core::arch::asm!("csrr {0}, sie", out(reg) val); }
+    val
 }
 
 /// panic 处理函数。

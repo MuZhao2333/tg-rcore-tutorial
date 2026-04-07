@@ -41,7 +41,12 @@ _m_start:
     li t0, -1
     csrw mcounteren, t0
 
-    # 8) mret 切到 S 态，开始执行章节内核入口
+    # 8) 使能 M-mode 时钟中断（MTIE），这样 wfi 才能接收到定时器中断
+    #    中断会通过 mideleg 委托给 S-mode，在 S-mode 处理
+    li t0, 1 << 7  # MTIE bit
+    csrs mie, t0
+
+    # 9) mret 切到 S 态，开始执行章节内核入口
     mret
 
     .section .text.m_trap

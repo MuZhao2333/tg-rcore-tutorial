@@ -19,4 +19,6 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
+# RISC-V 寄存器访问库，提供 sie、scause、time 等 CSR 操作
+riscv = "0.10.1"
 tg-sbi = { package = "tg-rcore-tutorial-sbi", path = "../tg-rcore-tutorial-sbi", version = "0.4.8", features = ["nobios"] }
