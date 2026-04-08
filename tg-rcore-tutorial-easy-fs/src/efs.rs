@@ -56,6 +56,8 @@ impl EasyFileSystem {
                     }
                 });
         }
+        // 将清盘结果写回设备，避免仅留在 16 块容量的块缓存里、后续再读块 1 时载入旧的 inode 位图。
+        block_cache_sync_all();
         // 第三步：写入 SuperBlock
         get_block_cache(0, Arc::clone(&block_device)).lock().modify(
             0,

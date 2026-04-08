@@ -39,6 +39,10 @@ const DEVICE_ID_GPU: u32 = 16;          // VirtIO GPU device ID
 
 const FRAMEBUFFER_BACKGROUND: u32 = 0xff1d2128;
 
+/// 用户态映射帧缓冲的固定虚拟基址（页对齐，低于常见 ELF 装载地址 0x8040_0000）。
+#[cfg(target_arch = "riscv64")]
+pub const USER_FRAMEBUFFER_VA: usize = 0x7000_0000;
+
 /// 显示分辨率（默认值）
 const XRES: usize = 1280;
 const YRES: usize = 800;
@@ -308,6 +312,28 @@ pub fn get_framebuffer_ptr() -> usize {
     FRAMEBUFFER_ADDR.load(Ordering::SeqCst)
 }
 
+/// 帧缓冲字节长度（与 VirtIO 分配的 `framebuffer` 一致）
+pub fn get_framebuffer_len() -> usize {
+    FRAMEBUFFER_LEN.load(Ordering::SeqCst)
+}
+
+/// 供 `get_fb_info` 写入用户结构体：必须与 `process::map_user_framebuffer` 映射一致。
+#[cfg(target_arch = "riscv64")]
+pub fn user_framebuffer_ptr() -> usize {
+    let pa = FRAMEBUFFER_ADDR.load(Ordering::SeqCst);
+    if pa == 0 {
+        return 0;
+    }
+    const PS: usize = 4096;
+    let page_off = pa & (PS - 1);
+    USER_FRAMEBUFFER_VA + page_off
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+pub fn user_framebuffer_ptr() -> usize {
+    FRAMEBUFFER_ADDR.load(Ordering::SeqCst)
+}
+
 /// 获取framebuffer pitch（字节/行）
 pub fn get_framebuffer_pitch() -> usize {
     FRAMEBUFFER_PITCH.load(Ordering::SeqCst)
@@ -334,7 +360,7 @@ pub fn gpu_flush() -> isize {
         return 0;
     }
 
-    log::debug!("[GPU] Framebuffer flush called, MMIO=0x{:x}", gpu_mmio);
+    // log::trace!("[GPU] Framebuffer flush called, MMIO=0x{:x}", gpu_mmio);
 
     // 优先使用全局保存的 gpu 对象
     if GLOBAL_GPU_INIT.load(Ordering::SeqCst) {
@@ -345,7 +371,7 @@ pub fn gpu_flush() -> isize {
             let mut gpu_owned = core::ptr::read(gpu_ptr);
             match (&mut gpu_owned).flush() {
                 Ok(_) => {
-                    log::debug!("[GPU] Flush successful (global gpu)");
+                    //log::trace!("[GPU] Flush successful (global gpu)");
                     // 将对象写回全局存储
                     core::ptr::write(gpu_ptr, gpu_owned);
                     return 0;

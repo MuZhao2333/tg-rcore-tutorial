@@ -161,6 +161,7 @@ static KERNEL_SPACE: KernelSpace = KernelSpace::new();
 
 /// VirtIO MMIO 设备地址范围（覆盖多个设备槽位）
 pub const MMIO: &[(usize, usize)] = &[
+    (0x1000_0000, 0x00_1000), // 16550 UART（内核直接轮询；避免 SBI getchar 忙等卡死用户态 poll）
     (0x1000_1000, 0x00_1000), // Slot 0: block device
     (0x1000_2000, 0x00_1000), // Slot 1: GPU
 ];
@@ -273,6 +274,104 @@ extern "C" fn rust_main() -> ! {
                             }
                         },
                     }
+                }
+                // 支持常见的页错误异常，打印地址后继续（防止 DOOM 崩溃后整个系统退出）。
+                // scause 编码：12=Instruction PF, 13=Load PF, 15=Store PF
+                scause::Trap::Exception(ex) => {
+                    let (fault_addr, fault_type_str) = {
+                        match ex {
+                            scause::Exception::InstructionPageFault => {
+                                let addr: usize;
+                                // SAFETY: stval is a read-only CSR
+                                unsafe { core::arch::asm!("csrr {}, stval", lateout(reg) addr); }
+                                (addr, "InstructionPageFault")
+                            }
+                            scause::Exception::LoadPageFault => {
+                                let addr: usize;
+                                unsafe { core::arch::asm!("csrr {}, stval", lateout(reg) addr); }
+                                (addr, "LoadPageFault")
+                            }
+                            scause::Exception::StorePageFault => {
+                                let addr: usize;
+                                unsafe { core::arch::asm!("csrr {}, stval", lateout(reg) addr); }
+                                (addr, "StorePageFault")
+                            }
+                            _ => {
+                                let e = scause::Trap::Exception(ex);
+                                log::error!("unsupported trap: {e:?}");
+                                unsafe { (*processor).make_current_exited(-3) };
+                                loop {}
+                            }
+                        }
+                    };
+                    let sepc_val: usize;
+                    unsafe { core::arch::asm!("csrr {}, sepc", lateout(reg) sepc_val); }
+                    let current = unsafe { (*processor).get_current_proc() };
+                    
+                    // 在一次借用中获取所有需要的信息
+                    let (pid, tid, current_satp, addr_space_for_translate) = if let Some(ref p) = current {
+                        let tid_val = unsafe { (*processor).current() }
+                            .map(|t| t.tid.get_usize())
+                            .unwrap_or(usize::MAX);
+                        let satp_val = unsafe { (*processor).current() }
+                            .map(|t| t.context.satp)
+                            .unwrap_or(0);
+                        (p.pid.get_usize(), tid_val, Some(satp_val), Some(core::ptr::addr_of!(p.address_space)))
+                    } else {
+                        (usize::MAX, usize::MAX, None, None)
+                    };
+                    
+                    println!("[DEBUG trap] ================================================");
+                    println!("[DEBUG trap] {} stval=0x{:016x} sepc=0x{:016x}", fault_type_str, fault_addr, sepc_val);
+                    println!("[DEBUG trap] pid={} tid={}", pid, tid);
+                    if let Some(satp) = current_satp {
+                        println!("[DEBUG trap] current_satp=0x{:016x} (ppn=0x{:x})", satp, satp & 0x0FFF_FFFF_FFFF);
+                    }
+                    
+                    // 尝试解析 sepc 和 fault_addr，判断是否是已知的用户地址范围
+                    #[cfg(target_arch = "riscv64")]
+                    if let Some(addr_space_ptr) = addr_space_for_translate {
+                        // SAFETY: addr_space_ptr 是从有效引用中获取的 NonNull 指针
+                        let addr_space = unsafe { &*addr_space_ptr };
+                        let sepc_va = VAddr::<Sv39>::new(sepc_val);
+                        let exec_ok = addr_space.translate::<u8>(sepc_va, build_flags("X_V")).is_some();
+                        let read_ok = addr_space.translate::<u8>(sepc_va, build_flags("RV")).is_some();
+                        let fault_va = VAddr::<Sv39>::new(fault_addr);
+                        let fault_exec_ok = addr_space.translate::<u8>(fault_va, build_flags("X_V")).is_some();
+                        let fault_read_ok = addr_space.translate::<u8>(fault_va, build_flags("RV")).is_some();
+                        let fault_write_ok = addr_space.translate::<u8>(fault_va, build_flags("W_V")).is_some();
+                        
+                        println!("[DEBUG trap] sepc=0x{:x}: exec_ok={}, read_ok={}", sepc_val, exec_ok, read_ok);
+                        println!("[DEBUG trap] fault_addr=0x{:x}: exec_ok={}, read_ok={}, write_ok={}", 
+                            fault_addr, fault_exec_ok, fault_read_ok, fault_write_ok);
+                        
+                        // 检查是否是 doom 栈地址
+                        let doom_stack_start = 0x3fffffe000usize;
+                        let doom_stack_end = 0x4000000000usize;
+                        let initproc_stack_start = 0x90b00000usize;
+                        let initproc_stack_end = 0x90c00000usize;
+                        
+                        if doom_stack_start <= fault_addr && fault_addr < doom_stack_end {
+                            println!("[DEBUG trap] fault_addr is in doom stack range!");
+                        } else if initproc_stack_start <= fault_addr && fault_addr < initproc_stack_end {
+                            println!("[DEBUG trap] fault_addr is in initproc stack range!");
+                        } else {
+                            println!("[DEBUG trap] fault_addr is NOT in doom/initproc stack range!");
+                        }
+                        
+                        // 检查是否是 doom 代码地址
+                        if fault_addr >= 0x20000 && fault_addr < 0x80000000 {
+                            println!("[DEBUG trap] fault_addr looks like doom/user code/data address");
+                        }
+                        
+                        // 检查页对齐
+                        let fault_vpn = fault_addr / 4096;
+                        let fault_offset = fault_addr % 4096;
+                        println!("[DEBUG trap] fault_addr VPN=0x{:x}, offset=0x{:x}", fault_vpn, fault_offset);
+                    }
+                    println!("[DEBUG trap] ================================================");
+                    // 用户态页错误无法自愈，继续调度只会同一指令反复 fault；结束当前任务。
+                    unsafe { (*processor).make_current_exited(-3) };
                 }
                 e => {
                     log::error!("unsupported trap: {e:?}");
@@ -440,6 +539,21 @@ mod impls {
     const READABLE: VmFlags<Sv39> = build_flags("RV");
     const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
 
+    /// QEMU virt 16550 UART：非阻塞读一字节（LSR bit0 = data ready）。
+    #[inline]
+    fn uart_try_recv_byte() -> Option<u8> {
+        const UART_BASE: usize = 0x1000_0000;
+        const UART_LSR: usize = UART_BASE + 5;
+        unsafe {
+            let lsr = (UART_LSR as *const u8).read_volatile();
+            if lsr & 1 != 0 {
+                Some((UART_BASE as *const u8).read_volatile())
+            } else {
+                None
+            }
+        }
+    }
+
     /// IO 系统调用（与第七章基本相同）
     ///
     /// 注意：本章通过 `get_current_proc()` 获取当前线程所属的进程，
@@ -468,13 +582,30 @@ mod impls {
 
         fn read(&self, _caller: Caller, fd: usize, buf: usize, count: usize) -> isize {
             let current = PROCESSOR.get_mut().get_current_proc().unwrap();
+            // 调试：检测可疑的 buf 地址（低于 0x1000 认为是疑似无效地址）
+            if buf < 0x1000 {
+                println!("[DEBUG] read: suspicious buf=0x{:x}, fd={}, count={}, pid={}",
+                    buf, fd, count, current.pid.get_usize());
+            }
             if let Some(ptr) = current.address_space.translate(VAddr::new(buf), WRITEABLE) {
                 if fd == STDIN {
-                    let mut ptr = ptr.as_ptr();
-                    for _ in 0..count {
-                        unsafe { *ptr = tg_sbi::console_getchar() as u8; ptr = ptr.add(1); }
+                    // 必须非阻塞：用户态 `tg_getchar_poll` 用 read(1) 轮询，若走 SBI
+                    // `console_getchar` 忙等会卡住整条用户线程（表现为需按键才继续）。
+                    let mut p = ptr.as_ptr();
+                    let mut nread = 0usize;
+                    while nread < count {
+                        match uart_try_recv_byte() {
+                            Some(c) => {
+                                unsafe {
+                                    *p = c;
+                                    p = p.add(1);
+                                }
+                                nread += 1;
+                            }
+                            None => break,
+                        }
                     }
-                    count as _
+                    nread as _
                 } else if let Some(file) = &current.fd_table[fd] {
                     let file = file.lock();
                     if file.readable() {
@@ -1016,12 +1147,26 @@ mod impls {
         fn get_fb_info(&self, _caller: Caller, info_ptr: usize) -> isize {
             const WRITABLE: VmFlags<Sv39> = build_flags("W_V");
             let current = PROCESSOR.get_mut().get_current_proc().unwrap();
+            // 调试：检测可疑的 info_ptr
+            if info_ptr < 0x1000 {
+                println!("[DEBUG] get_fb_info: suspicious info_ptr=0x{:x}, pid={}",
+                    info_ptr, current.pid.get_usize());
+            }
             if let Some(ptr) = current.address_space.translate::<u8>(VAddr::new(info_ptr), WRITABLE) {
                 unsafe {
                     // FbInfo layout: ptr(usize), width(u32), height(u32), pitch(u32), format(u32)
                     // Total size: 8 + 4 + 4 + 4 + 4 = 24 bytes
                     let info_ptr = ptr.as_ptr() as *mut crate::gpu::FbInfo;
-                    (*info_ptr).ptr = crate::gpu::get_framebuffer_ptr();
+                    let fb_va = crate::gpu::USER_FRAMEBUFFER_VA;
+                    let user_ptr = crate::gpu::user_framebuffer_ptr();
+                    let fb_readable = current.address_space.translate::<u8>(
+                        VAddr::new(fb_va), build_flags("RV")
+                    ).is_some();
+                    println!(
+                        "[DEBUG] get_fb_info: info_ptr=0x{:x}, fb_va=0x{:x}, user_ptr=0x{:x}, fb_readable={}, pid={}",
+                        info_ptr as usize, fb_va, user_ptr, fb_readable, current.pid.get_usize()
+                    );
+                    (*info_ptr).ptr = crate::gpu::user_framebuffer_ptr();
                     (*info_ptr).width = crate::gpu::get_resolution().0;
                     (*info_ptr).height = crate::gpu::get_resolution().1;
                     (*info_ptr).pitch = crate::gpu::get_framebuffer_pitch() as u32;
@@ -1042,12 +1187,29 @@ mod impls {
             use crate::gpu::DOOM_BLIT_BYTES;
             use tg_kernel_vm::page_table::MmuMeta;
 
+            let current = PROCESSOR.get_mut().get_current_proc().unwrap();
+            // 调试：检测可疑的 src 地址
+            if src < 0x10000 {
+                println!(
+                    "[DEBUG] fb_blit: suspicious src=0x{:x}, len={}, pid={}",
+                    src, len, current.pid.get_usize()
+                );
+            } else {
+                // 正常时只打印一次（在一定间隔内避免刷屏）
+                static mut FB_BLIT_COUNT: usize = 0;
+                unsafe {
+                    FB_BLIT_COUNT += 1;
+                    if FB_BLIT_COUNT % 1000 == 1 {
+                        println!("[DEBUG] fb_blit: src=0x{:x}, len={}, pid={}", src, len, current.pid.get_usize());
+                    }
+                }
+            }
+
             if len < DOOM_BLIT_BYTES {
                 log::error!("fb_blit: len {len} < {DOOM_BLIT_BYTES}");
                 return -1;
             }
 
-            let current = PROCESSOR.get_mut().get_current_proc().unwrap();
             let page_size = 1usize << Sv39::PAGE_BITS;
             let mut buf = alloc::vec![0u8; DOOM_BLIT_BYTES];
             let mut va = src;
@@ -1067,6 +1229,7 @@ mod impls {
                     copied += chunk;
                     va += chunk;
                 } else {
+                    println!("[DEBUG] fb_blit: translate failed for va=0x{:x}, copied={}", va, copied);
                     log::error!("fb_blit: unreadable user range at va=0x{va:x}");
                     return -1;
                 }

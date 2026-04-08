@@ -9,30 +9,26 @@ target = "riscv64gc-unknown-none-elf"
 # -bios none           ：不使用 BIOS（内核直接启动）
 # -drive ...           ：挂载 easy-fs 磁盘镜像（包含用户程序）
 # -device ...          ：VirtIO 块设备
-# -device virtio-gpu-pci：VirtIO GPU 设备（显示支持）
+# -device virtio-gpu-device：VirtIO GPU 设备（显示支持，MMIO 而非 PCI）
+# -serial mon:stdio   ：串口重定向到 stdio
 # -kernel              ：内核 ELF 文件
+#
+# 注意：WSL 中使用 /mnt/d/ 前缀访问 Windows 磁盘，且路径分隔符用 /
 [target.riscv64gc-unknown-none-elf]
 runner = [
-    "qemu-system-riscv64",
-    "-machine",
-    "virt",
-    "-bios",
-    "none",
-    "-drive",
-    "file=target/riscv64gc-unknown-none-elf/debug/fs.img,if=none,format=raw,id=x0",
-    "-device",
-    "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
-    "-device",
-    "virtio-gpu-device,bus=virtio-mmio-bus.1",
-    "-serial", "mon:stdio",
-    "-kernel",
+    "bash", "-c",
+    "cd /mnt/d/OS/parrale/tg-rcore-tutorial/tg-rcore-tutorial-ch8 && /usr/bin/qemu-system-riscv64 -machine virt -bios none -drive file=target/riscv64gc-unknown-none-elf/debug/fs.img,if=none,format=raw,id=x0 -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 -device virtio-gpu-device,bus=virtio-mmio-bus.1 -serial mon:stdio -kernel target/riscv64gc-unknown-none-elf/release/chenzt23-tg-rcore-tutorial-ch8",
 ]
 
 # tg-user 用户态库的配置，由 build.rs 读取
 # TG_USER_CRATE   : cargo clone 时使用的 crates.io 包名
 # TG_USER_LOCAL_DIR: 本地缓存目录名（位于 chN/ 下）
 # TG_USER_VERSION : 目标版本号
+# TG_DOOM_WAD     : doom1.wad 文件路径（相对于本项目根目录）
 [env]
 TG_USER_CRATE     = "tg-rcore-tutorial-user"
 TG_USER_LOCAL_DIR = "tg-rcore-tutorial-user"
 TG_USER_VERSION   = "0.4.8"
+# 直接指向本地修改后的用户态库目录
+TG_USER_DIR       = "../tg-rcore-tutorial-user"
+TG_DOOM_WAD       = "../doom1.wad"

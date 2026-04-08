@@ -4,6 +4,7 @@ use tg_easy_fs::{BlockDevice, EasyFileSystem};
 
 const TARGET_ARCH: &str = "riscv64gc-unknown-none-elf";
 const BLOCK_SZ: usize = 512;
+const EASY_FS_MAX_FILE_SIZE: usize = 16 * 1024 * 1024; // 16MB per file (doom1.wad ~4.2MB)
 
 #[derive(Deserialize, Default)]
 struct Cases {
@@ -21,6 +22,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TG_USER_LOCAL_DIR");
     println!("cargo:rerun-if-env-changed=TG_SKIP_USER_APPS");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_EXERCISE");
+    println!("cargo:rerun-if-env-changed=TG_DOOM_WAD");
+    println!("cargo:rerun-if-env-changed=TG_ENABLE_DOOM_C");
+    println!("cargo:rerun-if-env-changed=TG_DOOM_FULL");
 
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
 
@@ -53,7 +57,6 @@ fn write_linker() {
 fn is_packaged_build() -> bool {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let out_dir = out_dir.to_string_lossy();
-
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let manifest_dir = manifest_dir.to_string_lossy();
 
@@ -104,17 +107,60 @@ fn build_apps_and_pack_fs() {
         .join(TARGET_ARCH)
         .join("debug");
 
+    // 收集需要额外打包的文件（如 doom1.wad）
+    let extra_files = collect_extra_files(&tg_user_root, &names);
+
     for (i, name) in names.iter().enumerate() {
         let base_address = base + i as u64 * step;
+        println!("cargo:warning=building user app: {}", name);
         build_user_app(&tg_user_root, name, base_address);
     }
 
-    easy_fs_pack(&names, &app_target_dir, &fs_target_dir).unwrap_or_else(|err| {
+    easy_fs_pack(&names, &extra_files, &app_target_dir, &fs_target_dir).unwrap_or_else(|err| {
         panic!(
             "failed to pack easy-fs image in {}: {err}",
             fs_target_dir.display()
         )
     });
+}
+
+fn collect_extra_files(tg_user_root: &PathBuf, names: &[String]) -> Vec<(String, PathBuf)> {
+    let mut files = Vec::new();
+
+    if names.iter().any(|name| name == "doom") {
+        // 查找 doom1.wad
+        let wad_path = env::var_os("TG_DOOM_WAD")
+            .map(PathBuf::from)
+            .filter(|path| path.exists())
+            .or_else(|| {
+                let candidates = [
+                    PathBuf::from("doom1.wad"),
+                    tg_user_root.join("doom1.wad"),
+                ];
+                candidates.into_iter().find(|path| path.exists())
+            });
+
+        if let Some(path) = wad_path {
+            let size = std::fs::metadata(&path)
+                .map(|m| m.len() as usize)
+                .unwrap_or(0);
+            if size > EASY_FS_MAX_FILE_SIZE {
+                println!(
+                    "cargo:warning=doom1.wad is too large for easy-fs ({} > {}), skip packing",
+                    size,
+                    EASY_FS_MAX_FILE_SIZE
+                );
+            } else {
+                files.push(("doom1.wad".to_string(), path));
+            }
+        } else {
+            println!(
+                "cargo:warning=doom1.wad not found; set TG_DOOM_WAD=/path/to/doom1.wad"
+            );
+        }
+    }
+
+    files
 }
 
 fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
@@ -133,9 +179,26 @@ fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
         cmd.env("BASE_ADDRESS", base_address.to_string());
     }
 
+    // 为 doom 传递 C 编译相关环境变量
+    if name == "doom" {
+        let enable = env::var("TG_ENABLE_DOOM_C").unwrap_or_else(|_| "1".to_string());
+        let full = env::var("TG_DOOM_FULL").unwrap_or_else(|_| "1".to_string());
+        cmd.env("TG_ENABLE_DOOM_C", enable);
+        cmd.env("TG_DOOM_FULL", full);
+        // 禁用 debug info 以减小二进制大小
+        let mut rustflags = env::var("RUSTFLAGS").unwrap_or_default();
+        if !rustflags.contains("debuginfo=") {
+            if !rustflags.trim().is_empty() {
+                rustflags.push(' ');
+            }
+            rustflags.push_str("-C debuginfo=0");
+        }
+        cmd.env("RUSTFLAGS", rustflags);
+    }
+
     let status = cmd.status().expect("failed to execute cargo build for user app");
     if !status.success() {
-        panic!("failed to build user app {name}");
+        panic!("failed to build user app {}", name);
     }
 }
 
@@ -161,6 +224,7 @@ impl BlockDevice for BlockFile {
 
 fn easy_fs_pack(
     cases: &[String],
+    extra_files: &[(String, PathBuf)],
     app_target: &PathBuf,
     fs_target: &PathBuf,
 ) -> std::io::Result<()> {
@@ -172,10 +236,13 @@ fn easy_fs_pack(
     let fs_file = fs_target.join("fs.img");
     println!("cargo:rerun-if-changed={}", fs_file.display());
     let block_file = Arc::new(BlockFile(std::sync::Mutex::new({
+        // 必须 truncate：否则沿用旧 fs.img 时，清零循环未必覆盖仍留在缓存/磁盘上的旧 inode 位图，
+        // 会导致 alloc_inode() 首配返回 1 而非 0，EasyFileSystem::create 断言失败。
         let f = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(fs_file)?;
         f.set_len(64 * 2048 * BLOCK_SZ as u64).unwrap();
         f
@@ -184,15 +251,46 @@ fn easy_fs_pack(
     let efs = EasyFileSystem::create(block_file, 64 * 2048, 1);
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
 
-    for case in cases {
-        let mut host_file = std::fs::File::open(app_target.join(case)).unwrap();
+    // 打包用户程序 ELF
+    for case_name in cases {
+        let mut host_file = std::fs::File::open(app_target.join(case_name)).unwrap();
         let mut all_data: Vec<u8> = Vec::new();
         host_file.read_to_end(&mut all_data).unwrap();
-        let inode = root_inode.create(case.as_str()).unwrap();
+        assert_file_size_fits_easy_fs(case_name, all_data.len(), &app_target.join(case_name));
+        let inode = root_inode.create(case_name.as_str()).unwrap();
+        inode.write_at(0, all_data.as_slice());
+    }
+
+    // 打包额外文件（如 doom1.wad）
+    for (name, host_path) in extra_files {
+        let mut host_file = std::fs::File::open(host_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to open extra file '{}' from {}: {}",
+                name,
+                host_path.display(),
+                err
+            )
+        });
+        let mut all_data: Vec<u8> = Vec::new();
+        host_file.read_to_end(&mut all_data).unwrap();
+        assert_file_size_fits_easy_fs(name, all_data.len(), host_path);
+        let inode = root_inode.create(name.as_str()).unwrap();
         inode.write_at(0, all_data.as_slice());
     }
 
     Ok(())
+}
+
+fn assert_file_size_fits_easy_fs(name: &str, size: usize, host_path: &PathBuf) {
+    if size > EASY_FS_MAX_FILE_SIZE {
+        panic!(
+            "file '{}' is too large for easy-fs: {} bytes (max {}). host path: {}",
+            name,
+            size,
+            EASY_FS_MAX_FILE_SIZE,
+            host_path.display()
+        );
+    }
 }
 
 fn ensure_tg_user() -> PathBuf {

@@ -68,10 +68,17 @@ impl SuperBlock {
     }
 }
 /// Type of a disk inode
+///
+/// `#[repr(u32)]` keeps `DiskInode` layout identical on the host (where `build.rs` packs `fs.img`)
+/// and on `riscv64gc-unknown-none-elf` (kernel). Without it, the default enum layout can differ
+/// across targets and corrupt inode positions so root directory lookup (e.g. `initproc`) fails.
+#[repr(u32)]
 #[derive(PartialEq)]
 pub enum DiskInodeType {
-    File,
-    Directory,
+    /// 普通文件
+    File = 0,
+    /// 目录
+    Directory = 1,
 }
 
 /// A indirect block

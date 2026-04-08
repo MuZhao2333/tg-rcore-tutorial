@@ -1,2 +1,15 @@
 [build]
 target = "riscv64gc-unknown-none-elf"
+
+[target.riscv64gc-unknown-none-elf]
+# 使用 WSL 中的交叉编译器
+# 方案1: 通过 WSL 运行
+# CC = "wsl.exe -e riscv64-linux-gnu-gcc"
+# 方案2: 直接指定 Linux 路径（WSL 中使用）
+# 请根据实际情况取消注释或修改
+# CC = "riscv64-linux-gnu-gcc"
+
+[env]
+# 指定 C 交叉编译器（通过 WSL）
+# Windows 下需要 WSL 环境
+CC = "riscv64-linux-gnu-gcc"
