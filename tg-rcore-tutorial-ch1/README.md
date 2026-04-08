@@ -4,7 +4,7 @@
    ```bash
     cargo clone chenzt23-tg-rcore-tutorial-ch1-t3l1
     cd chenzt23-tg-rcore-tutorial-ch1-t3l1
-    bash cargo run
+    cargo run
     ```
 2. 通过github：
     ```bash
@@ -12,7 +12,7 @@
      cd tg-rcore-tutorial
      git checkout ch1-t3l1
      cd tg-rcore-tutorial-ch1
-     bash cargo run
+     cargo run
     ```
 
 # 第一章：应用程序与基本执行环境
