@@ -1,3 +1,20 @@
+### 陈子陶 2023012157
+# 复现
+1. 通过crates.io：
+   ```bash
+    cargo clone chenzt23-tg-rcore-tutorial-ch2-t3l2
+    cd chenzt23-tg-rcore-tutorial-ch2-t3l2
+    cargo run
+    ```
+2. 通过github：
+    ```bash
+     git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
+     cd tg-rcore-tutorial
+     git checkout t3l2
+     cd tg-rcore-tutorial-ch2
+     cargo run
+    ```
+
 # 第二章：批处理系统
 
 本章在第一章"最小执行环境"的基础上，实现了一个**批处理操作系统**（tg-rcore-tutorial-ch2）。它能够依次加载并运行多个用户程序，支持特权级切换和 Trap 处理，并实现了 `write` 和 `exit` 两个系统调用。
