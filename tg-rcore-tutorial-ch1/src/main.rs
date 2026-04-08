@@ -37,7 +37,40 @@
 use tg_sbi::{console_putchar, shutdown};
 
 // 引入 RISC-V 寄存器访问库，提供 CSR 操作（用于时钟中断）
-use riscv::register::{sie, sstatus, time};
+use riscv::register::{sie, sstatus, stvec, time};
+
+// ========== Trap 入口点（汇编实现）==========
+// 
+// stvec 指向 trap_entry。当 S-mode 发生 trap 时，CPU 跳转到这里。
+// trap_entry 是一个汇编标签，它：
+// 1. 调用 Rust 侧的 trap_handler 函数
+// 2. 通过 sret 指令返回到 trap 点之后的地址
+//
+// 这种实现方式避免了 naked_asm 的复杂性。
+core::arch::global_asm!(
+    r#"
+    .section .text.trap
+    .globl trap_entry
+    .align 4
+trap_entry:
+    // 保存 ra 和 t0 到栈（其他寄存器暂不保存，因为 trap_handler 自己保存）
+    addi sp, sp, -16
+    sd   ra, 0(sp)
+    sd   t0, 8(sp)
+    
+    // 调用 Rust 风格的 trap handler
+    call {trap_handler}
+    
+    // 恢复寄存器
+    ld   ra, 0(sp)
+    ld   t0, 8(sp)
+    addi sp, sp, 16
+    
+    // sret 指令返回到触发 trap 的位置
+    sret
+    "#,
+    trap_handler = sym _trap,
+);
 
 // ========== 常量定义 ==========
 
@@ -113,30 +146,55 @@ extern "C" fn rust_main() -> ! {
     print_hex(current_time);
 
     // 设置一个较短的时间间隔（1秒 = 10_000_000 个周期）
-    let next_interrupt = current_time + TIMER_INTERVAL as usize;
+    let mut next_interrupt = current_time + TIMER_INTERVAL as usize;
     for c in b"mtimecmp: " { console_putchar(*c); }
     print_hex(next_interrupt);
     set_timer(next_interrupt as u64);
 
-    for c in b"Wait for interrupt...\n" { console_putchar(*c); }
+    // 第四步：设置 S-mode trap 向量
+    // stvec 的低位用于指定 trap 处理方式（0=Direct, 1=Vectored）
+    // 这里设置为 Direct 模式，所有 trap 都跳转到同一个处理程序
+    // trap_entry 由 global_asm! 定义，是真正的汇编入口点
+    // SAFETY: 设置 stvec 是 S-mode 下允许的操作
+    unsafe {
+        unsafe extern "C" {
+            #[link_name = "trap_entry"]
+            fn trap_entry();
+        }
+        stvec::write(trap_entry as *const () as usize, stvec::TrapMode::Direct);
+    }
 
-    // 第四步：进入主循环
-    // 使用轮询方式检测定时器中断（调试用）
-    // 记录下一次中断时间，与当前时间比较来判断是否到期
-    let mut next_time = current_time + TIMER_INTERVAL as usize;
-    let mut counter = 0usize;
+    for c in b"stvec set, entering interrupt-driven mode...\n" { console_putchar(*c); }
+
+    // 第五步：轮询模式测试（用于诊断时间增长问题）
+    // 让我们先用轮询而不是 wfi 来看时间是否真的在增长
+    for c in b"Polling mode (testing)...\n" { console_putchar(*c); }
+    
+    let mut count = 0;
+    let mut loop_count = 0;
+    
     loop {
-        let current = time::read64() as usize;
-        if current >= next_time {
-            // 定时器到期了
+        let now = time::read64() as usize;
+        
+        // 每 100_000_000 次循环打印一次时间（以降低输出频率）
+        loop_count += 1;
+        if loop_count >= 100_000_000 {
+            loop_count = 0;
+            for c in b"time: " { console_putchar(*c); }
+            print_hex(now);
+        }
+        
+        // 检查是否达到下一次中断时间
+        if now >= next_interrupt {
             for c in b"\nTimer! " { console_putchar(*c); }
-            print_hex(current);
-
+            print_hex(now);
+            
             // 设置下一次中断
-            next_time = current + TIMER_INTERVAL as usize;
-            set_timer(next_time as u64);
-            counter += 1;
-            if counter >= 5 {
+            next_interrupt = now + TIMER_INTERVAL as usize;
+            set_timer(next_interrupt as u64);
+            count += 1;
+            
+            if count >= 5 {
                 for c in b"\nDone (5 ticks)\n" { console_putchar(*c); }
                 shutdown(false);
             }
@@ -189,6 +247,65 @@ fn read_sie() -> usize {
     unsafe { core::arch::asm!("csrr {0}, sie", out(reg) val); }
     val
 }
+
+/// S-mode trap 处理程序
+/// 
+/// stvec 指向这个函数。所有 S-mode trap（包括时钟中断）都会跳转到这里。
+/// 
+/// 该函数：
+/// 1. 在汇编末尾保存关键寄存器
+/// 2. 调用 Rust 处理函数 trap_handler  
+/// 3. 通过 sret 返回（继续执行 trap 点之后的代码）
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".text")]
+extern "C" fn _trap() {
+    // 读取 trap 原因
+    let scause: usize;
+    unsafe {
+        core::arch::asm!("csrr {}, scause", out(reg) scause);
+    }
+    
+    // 判断是否为时钟中断（高位为1表示中断，位5的中断是时钟中断）
+    let is_interrupt = (scause >> 63) != 0;
+    let cause_code = scause & 0x3f;
+    
+    if is_interrupt && cause_code == 5 {
+        // 时钟中断处理
+        static mut TRAP_COUNT: usize = 0;
+        
+        let count = unsafe {
+            TRAP_COUNT += 1;
+            TRAP_COUNT
+        };
+        
+        // 输出定时器信息
+        for c in b"\nTimer! " {
+            console_putchar(*c);
+        }
+        print_hex(time::read64() as usize);
+        
+        // 设置下一次定时器中断
+        use tg_sbi::set_timer;
+        let next = time::read64() as u64 + TIMER_INTERVAL;
+        set_timer(next);
+        
+        // 如果已经收到 5 次中断，则关机
+        if count >= 5 {
+            for c in b"\nDone (5 ticks)\n" {
+                console_putchar(*c);
+            }
+            shutdown(false);
+        }
+    } else {
+        // 其他 trap：输出错误并关机
+        for c in b"\nUnexpected trap! scause=" {
+            console_putchar(*c);
+        }
+        print_hex(scause);
+        shutdown(true);
+    }
+}
+
 
 /// panic 处理函数。
 ///
