@@ -86,7 +86,9 @@ impl<T: MonoForeignPortal> ForeignPortal for T {
     unsafe fn transit_cache(&mut self, key: impl SlotKey) -> &mut PortalCache {
         // SAFETY: 由调用者保证 key 对应的插槽已分配，
         // cache_offset 返回的偏移量指向有效的 PortalCache 结构
-        &mut *((self.transit_address() + self.cache_offset(key.index())) as *mut _)
+        unsafe {
+            &mut *((self.transit_address() + self.cache_offset(key.index())) as *mut _)
+        }
     }
 }
 
@@ -122,8 +124,8 @@ impl ForeignContext {
         // 异界传送门不能打开中断
         let interrupt = replace(&mut self.context.interrupt, false);
         // 找到公共空间上的缓存
-        let entry = portal.transit_entry();
-        let cache = portal.transit_cache(key);
+        let entry = unsafe { portal.transit_entry() };
+        let cache = unsafe { portal.transit_cache(key) };
         // 重置传送门上下文
         cache.init(
             self.satp,

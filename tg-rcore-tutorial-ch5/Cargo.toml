@@ -18,6 +18,13 @@ exclude = [
 
 [features]
 exercise = []
+scheduler-fcfs = []
+scheduler-sjf = []
+scheduler-rr = []
+scheduler-mlfq = []
+scheduler-cfs = []
+# 默认使用RR调度器
+default = ["scheduler-rr"]
 
 [profile.dev]
 panic = "abort"

@@ -13,7 +13,10 @@ extern "C" fn main() -> i32 {
     if fork() == 0 {
         // 子进程执行实际目标程序，父进程负责兜底回收孤儿退出。
         let target = match option_env!("CHAPTER").unwrap_or("0") {
-            "5" => "ch5_usertest",
+            "5" => {
+                // 优先尝试调度器测试（如果存在）
+                "ch5_scheduler_test"
+            }
             "6" => "ch6_usertest",
             "8" => "ch8_usertest",
             "-5" => "ch5b_usertest",

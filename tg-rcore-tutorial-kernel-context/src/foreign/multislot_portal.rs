@@ -48,10 +48,12 @@ impl MultislotPortal {
         // 内存布局：
         // | MultislotPortal | portal text | cache[0] | cache[1] | ... |
         // SAFETY: 由调用者保证 transit 指向足够大小的有效内存
-        PORTAL_TEXT.copy_to(transit + sizeof!(Self));
+        unsafe {
+            PORTAL_TEXT.copy_to(transit + sizeof!(Self));
+        }
         // SAFETY: 由调用者保证 transit 对齐且指向有效内存，
         // 返回 'static 生命周期是因为传送门在整个内核运行期间都有效
-        let ans = &mut *(transit as *mut Self);
+        let ans = unsafe { &mut *(transit as *mut Self) };
         ans.slot_count = slots;
         ans.text_size = PORTAL_TEXT.aligned_size();
         ans

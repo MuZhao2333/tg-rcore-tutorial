@@ -6,24 +6,12 @@
 //!
 //! 进程管理分为两部分：
 //! - `PROCESSOR`：封装 `PManager`，提供全局访问接口，管理当前运行的进程
-//! - `ProcManager`：实现 `Manage` 和 `Schedule` trait，负责进程的存储和调度
-//!
-//! ## 调度算法
-//!
-//! 当前使用简单的 **先进先出（FIFO）** / **时间片轮转（RR）** 调度：
-//! - `add`：将进程加入就绪队列尾部
-//! - `fetch`：从就绪队列头部取出下一个要执行的进程
-//!
-//! 练习题要求实现 **stride 调度算法**，需要修改此模块。
-//!
-//! 教程阅读建议：
-//!
-//! - 先看 `ProcManager`：理解“存储结构(BTreeMap) + 调度结构(VecDeque)”双结构搭配；
-//! - 再看 `Manage` 与 `Schedule` trait：理解抽象层如何为后续替换调度算法留接口；
-//! - 最后结合 `ch5/src/main.rs` 中对 `PROCESSOR` 的调用观察状态流转。
+//! - `ProcManager`：实现 `Manage` 和 `Schedule` trait，支持可插拔的调度算法
 
 use crate::process::Process;
-use alloc::collections::{BTreeMap, VecDeque};
+use crate::scheduler::{Scheduler, SchedulerType, create_scheduler};
+use alloc::collections::BTreeMap;
+use alloc::boxed::Box;
 use core::cell::UnsafeCell;
 use tg_task_manage::{Manage, PManager, ProcId, Schedule};
 
@@ -57,25 +45,74 @@ pub static PROCESSOR: Processor = Processor::new();
 
 /// 进程管理器
 ///
-/// 负责管理所有进程实体和调度队列：
+/// 负责管理所有进程实体和可插拔的调度器：
 /// - `tasks`：以 ProcId 为键的进程映射表，存储所有进程实体
-/// - `ready_queue`：就绪队列，存储等待执行的进程 PID
-///
-/// 当前使用 FIFO/RR 调度策略。练习题要求改为 stride 调度算法。
+/// - `scheduler`：可插拔的调度算法实现
 pub struct ProcManager {
     /// 所有进程实体的映射表
     tasks: BTreeMap<ProcId, Process>,
-    /// 就绪队列（FIFO 调度）
-    ready_queue: VecDeque<ProcId>,
+    /// 可插拔的调度器
+    scheduler: Box<dyn Scheduler>,
+    /// 当前运行的进程ID
+    current_process: Option<ProcId>,
+    /// 系统时钟周期
+    current_time: usize,
 }
 
 impl ProcManager {
     /// 创建新的进程管理器
     pub fn new() -> Self {
+        let default_scheduler = Self::default_scheduler();
+        
         Self {
             tasks: BTreeMap::new(),
-            ready_queue: VecDeque::new(),
+            scheduler: default_scheduler,
+            current_process: None,
+            current_time: 0,
         }
+    }
+
+    /// 运行时默认调度器（始终为RR，允许运行时切换）
+    fn default_scheduler() -> Box<dyn Scheduler> {
+        // 移除编译时feature门控，改为运行时选择
+        // 默认使用RR调度器（时间片10）
+        create_scheduler(SchedulerType::RR(10))
+    }
+
+    /// 创建指定调度器的进程管理器
+    #[allow(dead_code)]
+    pub fn with_scheduler(scheduler_type: SchedulerType) -> Self {
+        Self {
+            tasks: BTreeMap::new(),
+            scheduler: create_scheduler(scheduler_type),
+            current_process: None,
+            current_time: 0,
+        }
+    }
+
+    /// 切换调度器
+    #[allow(dead_code)]
+    pub fn switch_scheduler(&mut self, scheduler_type: SchedulerType) {
+        // 将现有队列中的所有进程重新加入新调度器
+        let current_pids: alloc::vec::Vec<_> = 
+            self.tasks.keys().copied().collect();
+        self.scheduler = create_scheduler(scheduler_type);
+        for pid in current_pids {
+            self.scheduler.enqueue(pid);
+        }
+    }
+
+    /// 获取调度器的统计信息
+    #[allow(dead_code)]
+    pub fn get_scheduler_stats(&self) -> &crate::scheduler::SchedulerStats {
+        self.scheduler.get_stats()
+    }
+
+    /// 更新系统时钟
+    #[allow(dead_code)]
+    pub fn tick(&mut self) {
+        self.current_time += 1;
+        self.scheduler.on_tick(self.current_process, self.current_time);
     }
 }
 
@@ -100,40 +137,17 @@ impl Manage<Process, ProcId> for ProcManager {
     }
 }
 
-/// 实现 Schedule trait：进程调度（stride scheduling）
-const BIG_STRIDE: usize = 0x1000_0000;
-
+/// 实现 Schedule trait：进程调度（支持可插拔的调度算法）
 impl Schedule<ProcId> for ProcManager {
-    /// 将进程加入就绪队列尾部
+    /// 将进程加入就绪队列
     fn add(&mut self, id: ProcId) {
-        // You might want to filter duplicates if the task is already there, but push_back is standard.
-        self.ready_queue.push_back(id);
+        self.scheduler.enqueue(id);
     }
 
-    /// 从就绪队列中选出 stride 最小的进程
+    /// 从就绪队列中选出下一个要执行的进程
     fn fetch(&mut self) -> Option<ProcId> {
-        if self.ready_queue.is_empty() {
-            return None;
-        }
-
-        let mut min_stride = usize::MAX;
-        let mut min_idx = 0;
-
-        for (i, &pid) in self.ready_queue.iter().enumerate() {
-            if let Some(task) = self.tasks.get(&pid) {
-                if task.stride < min_stride {
-                    min_stride = task.stride;
-                    min_idx = i;
-                }
-            }
-        }
-
-        let pid = self.ready_queue.remove(min_idx).unwrap();
-        if let Some(task) = self.tasks.get_mut(&pid) {
-            let pass = BIG_STRIDE / task.priority;
-            task.stride += pass;
-        }
-
-        Some(pid)
+        let next = self.scheduler.pick_next();
+        self.current_process = next;
+        next
     }
 }

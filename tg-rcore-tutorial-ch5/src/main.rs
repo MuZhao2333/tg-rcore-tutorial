@@ -43,6 +43,8 @@
 mod process;
 /// 处理器模块：定义 PROCESSOR 全局变量和进程管理器 ProcManager
 mod processor;
+/// 调度器模块：可插拔的调度算法框架
+mod scheduler;
 
 #[macro_use]
 extern crate tg_console;
@@ -228,7 +230,9 @@ extern "C" fn rust_main() -> ! {
     tg_syscall::init_memory(&SyscallContext);
     // 步骤 8：加载初始进程 initproc
     // initproc 是所有用户进程的祖先，它会 fork 出 shell 进程
-    let initproc_data = APPS.get("initproc").unwrap();
+    let initproc_data = APPS
+        .get("initproc")
+        .expect("initproc not found in APPS");
     if let Some(process) = Process::from_elf(ElfFile::new(initproc_data).unwrap()) {
         // 初始化进程管理器并添加 initproc
         PROCESSOR.get_mut().set_manager(ProcManager::new());

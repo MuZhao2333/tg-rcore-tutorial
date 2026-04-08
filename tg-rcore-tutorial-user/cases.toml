@@ -70,6 +70,7 @@ cases = [
     "ch5b_usertest",
     "user_shell",
     "initproc",
+    "ch5_scheduler_test",
 ]
 
 [ch6]
