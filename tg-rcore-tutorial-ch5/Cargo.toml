@@ -1,11 +1,11 @@
 [package]
-name = "Chenzt23-tg-rcore-tutorial-ch5"
+name = "chenzt23-tg-rcore-tutorial-ch5-t2l4"
 description = "Chapter 5 of rCore Tutorial: Process management with fork, exec and wait syscalls."
 version = "0.0.1-preview.1"
 edition = "2024"
 authors = ["Zitao Chen <chen-zt23@mails.tsinghua.edu.cn>"]
 repository = "https://github.com/MuZhao2333/tg-rcore-tutorial/"
-homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/test/tg-rcore-tutorial-ch5"
+homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/t2l4/tg-rcore-tutorial-ch5"
 documentation = "https://docs.rs/tg-rcore-tutorial-ch5"
 license = "GPL-3.0"
 readme = "README.md"

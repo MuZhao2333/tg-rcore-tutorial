@@ -2,15 +2,17 @@
 # 复现
 1. 通过crates.io：
    ```bash
-    cargo clone Chenzt23-tg-rcore-tutorial-ch5
-    cd Chenzt23-tg-rcore-tutorial-ch5
-    bash test.sh all
+    cargo clone chenzt23-tg-rcore-tutorial-ch5-t2l4
+    cd chenzt23-tg-rcore-tutorial-ch5-t2l4
+    python compare_schedulers.py
     ```
 2. 通过github：
     ```bash
      git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
-     cd tg-rcore-tutorial/tg-rcore-tutorial-ch5
-     bash test.sh all
+     cd tg-rcore-tutorial
+     git checkout t2l4
+     cd tg-rcore-tutorial-ch5
+     python compare_schedulers.py
     ```
 # 第五章：进程
 
