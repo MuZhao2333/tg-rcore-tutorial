@@ -132,31 +132,25 @@ fn print_int(mut n: u32) {
 }
 
 fn draw_tangram(fb: &mut [u8], xres: usize, yres: usize) {
-    // 清空屏幕
+    // 清空屏幕为白色
     for pixel in fb.iter_mut() {
-        *pixel = 0;
+        *pixel = 0xFF;
     }
 
     // 动态单位，根据较短边划分为若干个unit
     let min_side = xres.min(yres) as i32;
-    let u = (min_side / 6).max(20) as i32;
+    let u = (min_side / 5) as i32;
 
-    let lx = xres as i32 / 5; // left cluster center x (move a bit left)
-    let rx = xres as i32 * 3 / 4; // right cluster center x
-    let cy = yres as i32 / 2; // common center y
-
-    // ------------------
-    // 左侧图案（近似 "O" 样式的七巧板）
-    // ------------------
+    // ================== 单个七巧板组合（屏幕中央） ==================
     // 红色：左上小三角
     fill_triangle(
         fb,
-        lx - 3 * u,
-        cy - 3 * u,
-        lx - 1 * u,
-        cy - 3 * u,
-        lx - 3 * u,
-        cy - 1 * u,
+        0,
+        0,
+        0,
+        u,
+        u,
+        0,
         180,
         30,
         30,
@@ -164,20 +158,45 @@ fn draw_tangram(fb: &mut [u8], xres: usize, yres: usize) {
         yres,
     );
 
-    // 黄色：左侧长条（用矩形近似平行四边形）
-    fill_rect(fb, lx - 2 * u, cy - 2 * u, u, 4 * u, 255, 200, 30, xres, yres);
-    // 补一块小三角用于形状过渡
-    fill_triangle(fb, lx - 2 * u, cy - 2 * u, lx - 1 * u, cy - 2 * u, lx - 2 * u, cy - 1 * u, 255, 200, 30, xres, yres);
+    // 黄色：左侧平行四边形
+    fill_triangle(
+        fb,
+        0,
+        u,
+        u,
+        0,
+        u,
+        2*u,
+        255,
+        200,
+        30,
+        xres,
+        yres,
+    );
+    fill_triangle(
+        fb,
+        0,
+        3*u,
+        u,
+        2 *u,
+        0,
+        u,
+        255,
+        200,
+        30,
+        xres,
+        yres,
+    );
 
     // 青色：左下大三角
     fill_triangle(
         fb,
-        lx - 2 * u,
-        cy + 2 * u,
-        lx + 1 * u,
-        cy + 2 * u,
-        lx - 2 * u,
-        cy - 1 * u,
+        0,
+        3 * u,
+        0,
+        5 * u,
+        2* u,
+        5 * u,
         0,
         200,
         255,
@@ -185,34 +204,50 @@ fn draw_tangram(fb: &mut [u8], xres: usize, yres: usize) {
         yres,
     );
 
-    // 绿色：左下角正方形（微调位置）
-    fill_rect(fb, lx - u / 4, cy + u / 2, u, u, 120, 255, 80, xres, yres);
+    // // 绿色：中央正方形，由2个小三角组成
+    fill_triangle(fb, u, 4*u , 2*u,5*u, 2*u, 3*u, 120, 255, 80, xres, yres);
+    fill_triangle(fb, 3* u, 4*u , 2*u,5*u, 2*u, 3*u, 120, 255, 80, xres, yres);
 
-    // 蓝色：右侧竖直三角
+    // 蓝色：中间平行四边形
     fill_triangle(
         fb,
-        lx + 1 * u,
-        cy - 2 * u,
-        lx + 1 * u,
-        cy + 3 * u,
-        lx + 2 * u,
-        cy + 1 * u,
+        3*u,
+        4 * u,
+        2 * u,
+        3 * u,
+        3 * u,
+        2 * u,
         60,
         60,
         255,
         xres,
         yres,
     );
+    fill_triangle(
+        fb,
+        2*u,
+        3 * u,
+        3 * u,
+        2 * u,
+        2 * u,
+        1 * u,
+        60,
+        60,
+        255,
+        xres,
+        yres,
+    );
+
 
     // 品红：右上大三角
     fill_triangle(
         fb,
-        lx + 2 * u,
-        cy - 3 * u,
-        lx + 4 * u,
-        cy - 3 * u,
-        lx + 2 * u,
-        cy + 1 * u,
+        u,
+        0,
+        3*u,
+        0,
+        3*u,
+        2*u,
         255,
         80,
         200,
@@ -220,34 +255,34 @@ fn draw_tangram(fb: &mut [u8], xres: usize, yres: usize) {
         yres,
     );
 
-    // ------------------
-    // 右侧图案（近似 "S" 样式的七巧板组合）
-    // ------------------
-    // 青色：右上偏左大三角
+    let x_res = xres as i32;
+    
+    // 品红：右上梯形
     fill_triangle(
         fb,
-        rx - 3 * u,
-        cy - 2 * u,
-        rx - 1 * u,
-        cy - 4 * u,
-        rx + 0 * u,
-        cy - 1 * u,
+        x_res,
         0,
-        200,
+        x_res,
+         u/2,
+        x_res - u,
+        0,
         255,
+        80,
+        200,
         xres,
         yres,
     );
+    fill_triangle(fb, x_res-u, 0, x_res, u/2, x_res - u, u, 255, 80, 200, xres, yres);
 
-    // 蓝色：右上小三角
+    // 蓝色：右上横三角
     fill_triangle(
         fb,
-        rx - 1 * u,
-        cy - 2 * u,
-        rx + 1 * u,
-        cy - 1 * u,
-        rx - 2 * u,
-        cy - 1 * u,
+        x_res-u,
+        u,
+        x_res - u,
+        0,
+        x_res - 2* u,
+        0,
         60,
         60,
         255,
@@ -255,67 +290,82 @@ fn draw_tangram(fb: &mut [u8], xres: usize, yres: usize) {
         yres,
     );
 
-    // 品红：右上角小三角
+    // 青色：S左上三角
     fill_triangle(
         fb,
-        rx + 1 * u,
-        cy - 2 * u,
-        rx + 2 * u,
-        cy - 1 * u,
-        rx + 0 * u,
-        cy - 1 * u,
+        x_res-2*u,
+        0,
+        x_res-3 * u,
+        u,
+        x_res-2 * u,
+        2 * u,
+        0,
+        200,
         255,
+        xres,
+        yres,
+    );
+
+    // 绿色：S中部正方形：
+    fill_triangle(fb, x_res-2*u, 2*u, x_res- u, 2*u, x_res-2*u, 3*u, 120, 255, 80, xres, yres);
+    fill_triangle(fb, x_res-u, 3*u, x_res- u, 2*u, x_res-2*u, 3*u, 120, 255, 80, xres, yres);
+
+    //品红：S右部三角形
+    fill_triangle(
+        fb,
+        x_res-u,
+        2*u,
+        x_res,
+        3 * u,
+        x_res- u,
+        4 * u,
+         255,
         80,
         200,
         xres,
         yres,
     );
 
-    // 绿色：右侧中心正方形
-    fill_rect(fb, rx - u / 2, cy - u / 2, u, u, 120, 255, 80, xres, yres);
-
-    // 橙色：右下平行四边形（用两块三角拼成）
+    // 蓝色：S下三角形
     fill_triangle(
         fb,
-        rx - 3 * u,
-        cy + 1 * u,
-        rx - 1 * u,
-        cy + 1 * u,
-        rx - 2 * u,
-        cy + 3 * u,
+        x_res-u,
+        4*u,
+        x_res-3 * u/2,
+        5 * u,
+        x_res- 2*u,
+        4 * u,
+        60,
+        60,
         255,
-        150,
-        0,
+        xres,
+        yres,
+    );
+
+    // 橙色：S下方平行四边形
+    fill_triangle(
+        fb,
+        x_res-2*u,
+        4*u,
+        x_res-3 * u/2,
+        5 * u,
+        x_res-5 * u/2,
+        5 * u,
+        255, 120,
+        30,
         xres,
         yres,
     );
     fill_triangle(
         fb,
-        rx - 2 * u,
-        cy + 1 * u,
-        rx + 0 * u,
-        cy + 1 * u,
-        rx - 1 * u,
-        cy + 3 * u,
-        255,
-        150,
-        0,
-        xres,
-        yres,
-    );
-
-    // 品红：右下小三角
-    fill_triangle(
-        fb,
-        rx + 0 * u,
-        cy + 1 * u,
-        rx + 2 * u,
-        cy + 3 * u,
-        rx + 0 * u,
-        cy + 3 * u,
-        255,
-        80,
-        200,
+        x_res-5*u/2,
+        5*u,
+        x_res-2 * u,
+        4 * u,
+        x_res-3*u,
+        4 * u,
+        255, 120,        
+        30,
         xres,
         yres,
     );
@@ -386,25 +436,25 @@ fn fill_triangle(
     }
 }
 
-/// 填充矩形
-fn fill_rect(
-    fb: &mut [u8],
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    r: u8,
-    g: u8,
-    b: u8,
-    xres: usize,
-    yres: usize,
-) {
-    for dy in 0..h {
-        for dx in 0..w {
-            put_pixel(fb, (x + dx) as usize, (y + dy) as usize, r, g, b, xres, yres);
-        }
-    }
-}
+// /// 填充矩形
+// fn fill_rect(
+//     fb: &mut [u8],
+//     x: i32,
+//     y: i32,
+//     w: i32,
+//     h: i32,
+//     r: u8,
+//     g: u8,
+//     b: u8,
+//     xres: usize,
+//     yres: usize,
+// ) {
+//     for dy in 0..h {
+//         for dx in 0..w {
+//             put_pixel(fb, (x + dx) as usize, (y + dy) as usize, r, g, b, xres, yres);
+//         }
+//     }
+// }
 
 
 
@@ -494,9 +544,9 @@ extern "C" fn rust_main() -> ! {
                                                         print_int(fb.len() as u32);
                                                         print_str("\n");
 
-                                                        // 第一步：清空framebuffer
+                                                        // 第一步：清空framebuffer为白色
                                                         for pixel in fb.iter_mut() {
-                                                            *pixel = 0;
+                                                            *pixel = 0xFF;
                                                         }
 
                                                         print_str("Drawing tangram...\n");
@@ -511,7 +561,7 @@ extern "C" fn rust_main() -> ! {
                                             // 退回到原来的处理，尽量尝试设置 framebuffer
                                             match gpu.setup_framebuffer() {
                                                 Ok(fb) => {
-                                                    for pixel in fb.iter_mut() { *pixel = 0; }
+                                                    for pixel in fb.iter_mut() { *pixel = 0xFF; }
                                                     print_str("Drawing tangram...\n");
                                                     // 仍然使用默认常量作为后备
                                                     draw_tangram(fb, XRES, YRES);
