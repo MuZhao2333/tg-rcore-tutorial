@@ -17,6 +17,12 @@ cases = [
     "ch2_tangram_4",
     "ch2_tangram_5",
     "ch2_tangram_6",
+    "ch2_tangram_7",
+    "ch2_tangram_8",
+    "ch2_tangram_9",
+    "ch2_tangram_10",
+    "ch2_tangram_11",
+    "ch2_tangram_12",
 ]
 
 [ch3]

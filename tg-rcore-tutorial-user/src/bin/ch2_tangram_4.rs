@@ -44,9 +44,9 @@ fn fill_triangle(
     g: u8,
     b: u8,
     xres: usize,
-    pitch: usize,
     yres: usize,
 ) {
+    let pitch = xres * 4;
     let min_y = y1.min(y2).min(y3);
     let max_y = y1.max(y2).max(y3);
 
@@ -72,36 +72,7 @@ fn fill_triangle(
     }
 }
 
-/// 填充矩形
-fn fill_rect(
-    fb: &mut [u8],
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    r: u8,
-    g: u8,
-    b: u8,
-    xres: usize,
-    pitch: usize,
-    yres: usize,
-) {
-    for dy in 0..h {
-        for dx in 0..w {
-            put_pixel(
-                fb,
-                (x + dx) as usize,
-                (y + dy) as usize,
-                r,
-                g,
-                b,
-                xres,
-                pitch,
-                yres,
-            );
-        }
-    }
-}
+
 
 #[unsafe(no_mangle)]
 extern "C" fn main() -> i32 {
@@ -126,51 +97,41 @@ extern "C" fn main() -> i32 {
 
     let fb = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr as *mut u8, fb_len) };
 
-    // 动态单位
-    let min_side = (xres.min(yres) as i32) / 6;
-    let u = min_side.max(20);
+    // 动态单位，根据较短边划分为若干个unit
+    let min_side = xres.min(yres) as i32;
+    let u = (min_side / 5) as i32;
 
-    let lx = xres as i32 / 5;
-    let cy = yres as i32 / 2;
-
-    // 程序4：右侧大三角（品红色）
+    // 块4：蓝色：中间平行四边形（两个三角形）
     fill_triangle(
         fb,
-        lx + 2 * u,
-        cy - 3 * u,
-        lx + 4 * u,
-        cy - 3 * u,
-        lx + 2 * u,
-        cy + 1 * u,
+        3*u,
+        4 * u,
+        2 * u,
+        3 * u,
+        3 * u,
+        2 * u,
+        60,
+        60,
         255,
-        80,
-        200,
         xres,
-        pitch,
+        yres,
+    );
+    fill_triangle(
+        fb,
+        2*u,
+        3 * u,
+        3 * u,
+        2 * u,
+        2 * u,
+        1 * u,
+        60,
+        60,
+        255,
+        xres,
         yres,
     );
 
-    // 右侧相关变量
-    let rx = xres as i32 * 3 / 4;
-
-    // 右上偏左大三角（青色）
-    fill_triangle(
-        fb,
-        rx - 3 * u,
-        cy - 2 * u,
-        rx - 1 * u,
-        cy - 4 * u,
-        rx + 0 * u,
-        cy - 1 * u,
-        0,
-        200,
-        255,
-        xres,
-        pitch,
-        yres,
-    );
-
-    println!("Tangram part 4 (magenta and cyan triangles) rendered");
+    println!("Tangram part 4 (blue parallelogram) rendered");
     framebuffer_flush();
     0
 }

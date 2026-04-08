@@ -44,9 +44,9 @@ fn fill_triangle(
     g: u8,
     b: u8,
     xres: usize,
-    pitch: usize,
     yres: usize,
 ) {
+    let pitch = xres * 4;
     let min_y = y1.min(y2).min(y3);
     let max_y = y1.max(y2).max(y3);
 
@@ -72,36 +72,7 @@ fn fill_triangle(
     }
 }
 
-/// 填充矩形
-fn fill_rect(
-    fb: &mut [u8],
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    r: u8,
-    g: u8,
-    b: u8,
-    xres: usize,
-    pitch: usize,
-    yres: usize,
-) {
-    for dy in 0..h {
-        for dx in 0..w {
-            put_pixel(
-                fb,
-                (x + dx) as usize,
-                (y + dy) as usize,
-                r,
-                g,
-                b,
-                xres,
-                pitch,
-                yres,
-            );
-        }
-    }
-}
+
 
 #[unsafe(no_mangle)]
 extern "C" fn main() -> i32 {
@@ -126,32 +97,15 @@ extern "C" fn main() -> i32 {
 
     let fb = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr as *mut u8, fb_len) };
 
-    // 动态单位
-    let min_side = (xres.min(yres) as i32) / 6;
-    let u = min_side.max(20);
+    // 动态单位，根据较短边划分为若干个unit
+    let min_side = xres.min(yres) as i32;
+    let u = (min_side / 5) as i32;
 
-    let lx = xres as i32 / 5;
-    let cy = yres as i32 / 2;
+    // 块3：绿色：中央正方形，由2个小三角组成
+    fill_triangle(fb, u, 4*u , 2*u, 5*u, 2*u, 3*u, 120, 255, 80, xres, yres);
+    fill_triangle(fb, 3* u, 4*u , 2*u, 5*u, 2*u, 3*u, 120, 255, 80, xres, yres);
 
-    // 程序3：左下正方形（绿色）和蓝色竖直三角
-    fill_rect(fb, lx - u / 4, cy + u / 2, u, u, 120, 255, 80, xres, pitch, yres);
-    fill_triangle(
-        fb,
-        lx + 1 * u,
-        cy - 2 * u,
-        lx + 1 * u,
-        cy + 3 * u,
-        lx + 2 * u,
-        cy + 1 * u,
-        60,
-        60,
-        255,
-        xres,
-        pitch,
-        yres,
-    );
-
-    println!("Tangram part 3 (left square and blue triangle) rendered");
+    println!("Tangram part 3 (green central square) rendered");
     framebuffer_flush();
     0
 }

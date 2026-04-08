@@ -32,6 +32,7 @@ fn put_pixel(
 }
 
 /// 填充三角形
+/// 填充三角形
 fn fill_triangle(
     fb: &mut [u8],
     x1: i32,
@@ -44,9 +45,9 @@ fn fill_triangle(
     g: u8,
     b: u8,
     xres: usize,
-    pitch: usize,
     yres: usize,
 ) {
+    let pitch = xres * 4;
     let min_y = y1.min(y2).min(y3);
     let max_y = y1.max(y2).max(y3);
 
@@ -95,64 +96,30 @@ extern "C" fn main() -> i32 {
 
     let fb = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr as *mut u8, fb_len) };
 
-    // 动态单位
-    let min_side = (xres.min(yres) as i32) / 6;
-    let u = min_side.max(20);
+    // 动态单位，根据较短边划分为若干个unit
+    let min_side = xres.min(yres) as i32;
+    let u = (min_side / 5) as i32;
 
-    let cy = yres as i32 / 2;
-    let rx = xres as i32 * 3 / 4;
+    let x_res = xres as i32;
 
-    // 程序6：右下平行四边形（橙色）- 用两块三角拼成
+    // 块6：品红：右上梯形（两个三角形）
     fill_triangle(
         fb,
-        rx - 3 * u,
-        cy + 1 * u,
-        rx - 1 * u,
-        cy + 1 * u,
-        rx - 2 * u,
-        cy + 3 * u,
-        255,
-        150,
+        x_res,
         0,
-        xres,
-        pitch,
-        yres,
-    );
-    fill_triangle(
-        fb,
-        rx - 2 * u,
-        cy + 1 * u,
-        rx + 0 * u,
-        cy + 1 * u,
-        rx - 1 * u,
-        cy + 3 * u,
-        255,
-        150,
+        x_res,
+         u/2,
+        x_res - u,
         0,
-        xres,
-        pitch,
-        yres,
-    );
-
-    // 右下小三角（品红色）
-    fill_triangle(
-        fb,
-        rx + 0 * u,
-        cy + 1 * u,
-        rx + 2 * u,
-        cy + 3 * u,
-        rx + 0 * u,
-        cy + 3 * u,
         255,
         80,
         200,
         xres,
-        pitch,
         yres,
     );
+    fill_triangle(fb, x_res-u, 0, x_res, u/2, x_res - u, u, 255, 80, 200, xres, yres);
 
-    println!("Tangram part 6 (right parallelogram and triangle) rendered");
-    println!("All tangram parts rendered successfully!");
+    println!("Tangram part 6 (magenta right-top trapezoid) rendered");
     framebuffer_flush();
     0
 }

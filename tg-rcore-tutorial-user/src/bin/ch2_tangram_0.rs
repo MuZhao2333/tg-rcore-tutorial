@@ -44,9 +44,9 @@ fn fill_triangle(
     g: u8,
     b: u8,
     xres: usize,
-    pitch: usize,
     yres: usize,
 ) {
+    let pitch = xres * 4;
     let min_y = y1.min(y2).min(y3);
     let max_y = y1.max(y2).max(y3);
 
@@ -126,31 +126,32 @@ extern "C" fn main() -> i32 {
 
     let fb = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr as *mut u8, fb_len) };
 
+    // 清空屏幕为白色
+    for pixel in fb.iter_mut() {
+        *pixel = 0xFF;
+    }
+
     // 动态单位，根据较短边划分为若干个unit
-    let min_side = (xres.min(yres) as i32) / 6;
-    let u = min_side.max(20);
+    let min_side = xres.min(yres) as i32;
+    let u = (min_side / 5) as i32;
 
-    let lx = xres as i32 / 5; // left cluster center x
-    let cy = yres as i32 / 2; // common center y
-
-    // 程序0：左上小三角（红色）
+    // 块0：红色：左上小三角
     fill_triangle(
         fb,
-        lx - 3 * u,
-        cy - 3 * u,
-        lx - 1 * u,
-        cy - 3 * u,
-        lx - 3 * u,
-        cy - 1 * u,
+        0,
+        0,
+        0,
+        u,
+        u,
+        0,
         180,
         30,
         30,
         xres,
-        pitch,
         yres,
     );
 
-    println!("Tangram part 0 (left triangle) rendered");
+    println!("Tangram part 0 (red left-top triangle) rendered");
     framebuffer_flush();
     0
 }

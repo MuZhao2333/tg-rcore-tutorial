@@ -31,33 +31,43 @@ fn put_pixel(
     }
 }
 
-/// 填充矩形
-fn fill_rect(
+/// 填充三角形
+fn fill_triangle(
     fb: &mut [u8],
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+    x3: i32,
+    y3: i32,
     r: u8,
     g: u8,
     b: u8,
     xres: usize,
-    pitch: usize,
     yres: usize,
 ) {
-    for dy in 0..h {
-        for dx in 0..w {
-            put_pixel(
-                fb,
-                (x + dx) as usize,
-                (y + dy) as usize,
-                r,
-                g,
-                b,
-                xres,
-                pitch,
-                yres,
-            );
+    let pitch = xres * 4;
+    let min_y = y1.min(y2).min(y3);
+    let max_y = y1.max(y2).max(y3);
+
+    for y in min_y..=max_y {
+        let mut x_min = i32::MAX;
+        let mut x_max = i32::MIN;
+
+        for (xa, ya, xb, yb) in &[(x1, y1, x2, y2), (x2, y2, x3, y3), (x3, y3, x1, y1)] {
+            if (*ya <= y && y <= *yb) || (*yb <= y && y <= *ya) {
+                if *ya != *yb {
+                    let x = *xa + (*xb - *xa) * (y - *ya) / (*yb - *ya);
+                    x_min = x_min.min(x);
+                    x_max = x_max.max(x);
+                }
+            }
+        }
+
+        if x_min <= x_max {
+            for x in x_min..=x_max {
+                put_pixel(fb, x as usize, y as usize, r, g, b, xres, pitch, yres);
+            }
         }
     }
 }
@@ -85,17 +95,41 @@ extern "C" fn main() -> i32 {
 
     let fb = unsafe { core::slice::from_raw_parts_mut(fb_info.ptr as *mut u8, fb_len) };
 
-    // 动态单位
-    let min_side = (xres.min(yres) as i32) / 6;
-    let u = min_side.max(20);
+    // 动态单位，根据较短边划分为若干个unit
+    let min_side = xres.min(yres) as i32;
+    let u = (min_side / 5) as i32;
 
-    let lx = xres as i32 / 5;
-    let cy = yres as i32 / 2;
+    // 块1：黄色：左侧平行四边形（两个三角形）
+    fill_triangle(
+        fb,
+        0,
+        u,
+        u,
+        0,
+        u,
+        2*u,
+        255,
+        200,
+        30,
+        xres,
+        yres,
+    );
+    fill_triangle(
+        fb,
+        0,
+        3*u,
+        u,
+        2 *u,
+        0,
+        u,
+        255,
+        200,
+        30,
+        xres,
+        yres,
+    );
 
-    // 程序1：左侧长条（黄色）
-    fill_rect(fb, lx - 2*u, cy - 2*u, u, 4*u, 255, 200, 30, xres, pitch, yres);
-
-    println!("Tangram part 1 (left bar) rendered");
+    println!("Tangram part 1 (yellow parallelogram) rendered");
     framebuffer_flush();
     0
 }

@@ -99,15 +99,17 @@ extern "C" fn main() -> i32 {
     let min_side = xres.min(yres) as i32;
     let u = (min_side / 5) as i32;
 
-    // 块2：青色：左下大三角
+    let x_res = xres as i32;
+
+    // 块8：青色：S左上三角
     fill_triangle(
         fb,
+        x_res-2*u,
         0,
-        3 * u,
-        0,
-        5 * u,
-        2* u,
-        5 * u,
+        x_res-3 * u,
+        u,
+        x_res-2 * u,
+        2 * u,
         0,
         200,
         255,
@@ -115,7 +117,7 @@ extern "C" fn main() -> i32 {
         yres,
     );
 
-    println!("Tangram part 2 (cyan large triangle) rendered");
+    println!("Tangram part 8 (cyan S top-left triangle) rendered");
     framebuffer_flush();
     0
 }

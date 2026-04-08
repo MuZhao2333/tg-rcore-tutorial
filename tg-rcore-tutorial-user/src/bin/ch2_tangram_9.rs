@@ -99,23 +99,13 @@ extern "C" fn main() -> i32 {
     let min_side = xres.min(yres) as i32;
     let u = (min_side / 5) as i32;
 
-    // 块2：青色：左下大三角
-    fill_triangle(
-        fb,
-        0,
-        3 * u,
-        0,
-        5 * u,
-        2* u,
-        5 * u,
-        0,
-        200,
-        255,
-        xres,
-        yres,
-    );
+    let x_res = xres as i32;
 
-    println!("Tangram part 2 (cyan large triangle) rendered");
+    // 块9：绿色：S中部正方形（两个三角形）
+    fill_triangle(fb, x_res-2*u, 2*u, x_res- u, 2*u, x_res-2*u, 3*u, 120, 255, 80, xres, yres);
+    fill_triangle(fb, x_res-u, 3*u, x_res- u, 2*u, x_res-2*u, 3*u, 120, 255, 80, xres, yres);
+
+    println!("Tangram part 9 (green S central square) rendered");
     framebuffer_flush();
     0
 }
