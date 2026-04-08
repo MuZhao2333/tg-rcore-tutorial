@@ -1,3 +1,20 @@
+### 陈子陶 2023012157
+# 复现
+1. 通过crates.io：
+   ```bash
+    cargo clone chenzt23-tg-rcore-tutorial-ch1-t3l1
+    cd chenzt23-tg-rcore-tutorial-ch1-t3l1
+    bash cargo run
+    ```
+2. 通过github：
+    ```bash
+     git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
+     cd tg-rcore-tutorial
+     git checkout ch1-t3l1
+     cd tg-rcore-tutorial-ch1
+     bash cargo run
+    ```
+
 # 第一章：应用程序与基本执行环境
 
 本章实现了一个最简单的 RISC-V S 态裸机程序（tg-rcore-tutorial-ch1），展示操作系统的最小执行环境。程序在 QEMU 模拟的 RISC-V 64 硬件上运行，不依赖 OpenSBI 或 RustSBI，通过 `-bios none` 模式直接启动，打印 `Hello, world!` 后关机。
