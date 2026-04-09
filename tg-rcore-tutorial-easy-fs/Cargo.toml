@@ -1,11 +1,11 @@
 [package]
-name = "chenzt23-tg-rcore-tutorial-easy-fs"
+name = "chenzt23-tg-rcore-tutorial-easy-fs-t3l8"
 description = "A simple filesystem implementation for rCore tutorial OS."
 version = "0.0.1-preview.1"
 edition = "2024"
 authors = ["Zitao Chen <chen-zt23@mails.tsinghua.edu.cn>"]
 repository = "https://github.com/MuZhao2333/tg-rcore-tutorial/"
-homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/test/tg-rcore-tutorial-easy-fs"
+homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/t3l8/tg-rcore-tutorial-easy-fs"
 documentation = "https://docs.rs/tg-rcore-tutorial-easy-fs"
 license = "GPL-3.0"
 readme = "README.md"

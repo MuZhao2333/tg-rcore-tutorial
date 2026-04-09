@@ -1,11 +1,11 @@
 [package]
-name = "tg-rcore-tutorial-syscall"
+name = "chenzt23-tg-rcore-tutorial-syscall-t3l8"
 description = "System call definitions and interfaces for rCore tutorial OS."
-version = "0.4.8"
+version = "0.0.1-preview.1"
 edition = "2024"
-authors = ["YdrMaster <ydrml@hotmail.com>"]
-repository = "https://github.com/rcore-os/tg-rcore-tutorial-syscall"
-homepage = "https://github.com/rcore-os/tg-rcore-tutorial-syscall/tree/test"
+authors = ["Zitao Chen <chen-zt23@mails.tsinghua.edu.cn>"]
+repository = "https://github.com/MuZhao2333/tg-rcore-tutorial/"
+homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/t3l8/tg-rcore-tutorial-syscall"
 documentation = "https://docs.rs/tg-rcore-tutorial-syscall"
 license = "GPL-3.0"
 readme = "README.md"

@@ -26,9 +26,8 @@ runner = [
 # TG_USER_VERSION : 目标版本号
 # TG_DOOM_WAD     : doom1.wad 文件路径（相对于本项目根目录）
 [env]
-TG_USER_CRATE     = "tg-rcore-tutorial-user"
-TG_USER_LOCAL_DIR = "tg-rcore-tutorial-user"
-TG_USER_VERSION   = "0.4.8"
+TG_USER_CRATE     = "chenzt23-tg-rcore-tutorial-user-t3l8"
+TG_USER_LOCAL_DIR = "chenzt23-tg-rcore-tutorial-user-t3l8"
+TG_USER_VERSION   = "0.0.1-preview.1"
 # 直接指向本地修改后的用户态库目录
-TG_USER_DIR       = "../tg-rcore-tutorial-user"
-TG_DOOM_WAD       = "../doom1.wad"
+TG_DOOM_WAD       = "doom1.wad"

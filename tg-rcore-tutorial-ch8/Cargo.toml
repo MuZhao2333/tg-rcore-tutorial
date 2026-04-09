@@ -1,11 +1,11 @@
 [package]
-name = "chenzt23-tg-rcore-tutorial-ch8"
+name = "chenzt23-tg-rcore-tutorial-ch8-t3l8"
 description = "Chapter 8 of rCore Tutorial: Concurrency with threads, mutex, semaphore and condvar."
 version = "0.0.1-preview.1"
 edition = "2024"
 authors = ["Zitao Chen <chen-zt23@mails.tsinghua.edu.cn>"]
 repository = "https://github.com/MuZhao2333/tg-rcore-tutorial/"
-homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/test/tg-rcore-tutorial-ch8"
+homepage = "https://github.com/MuZhao2333/tg-rcore-tutorial/tree/t3l8/tg-rcore-tutorial-ch8"
 documentation = "https://docs.rs/tg-rcore-tutorial-ch8"
 license = "GPL-3.0"
 readme = "README.md"
@@ -37,9 +37,9 @@ tg-console = { package = "tg-rcore-tutorial-console", path = "../tg-rcore-tutori
 tg-kernel-context = { package = "tg-rcore-tutorial-kernel-context", path = "../tg-rcore-tutorial-kernel-context", version = "0.4.8", features = ["foreign"] }
 tg-kernel-alloc = { package = "tg-rcore-tutorial-kernel-alloc", path = "../tg-rcore-tutorial-kernel-alloc", version = "0.4.8" }
 tg-kernel-vm = { package = "tg-rcore-tutorial-kernel-vm", path = "../tg-rcore-tutorial-kernel-vm", version = "0.4.8" }
-tg-syscall = { package = "tg-rcore-tutorial-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.4.8", features = ["kernel"] }
+tg-syscall = { package = "chenzt23-tg-rcore-tutorial-syscall-t3l8", path = "../tg-rcore-tutorial-syscall", version = "0.4.8", features = ["kernel"] }
 tg-task-manage = { package = "tg-rcore-tutorial-task-manage", path = "../tg-rcore-tutorial-task-manage", version = "0.4.8", features = ["thread"] }
-tg-easy-fs = { package = "chenzt23-tg-rcore-tutorial-easy-fs", path = "../tg-rcore-tutorial-easy-fs", version = "0.0.1-preview.1" }
+tg-easy-fs = { package = "chenzt23-tg-rcore-tutorial-easy-fs-t3l8", path = "../tg-rcore-tutorial-easy-fs", version = "0.0.1-preview.1" }
 
 tg-signal = { package = "tg-rcore-tutorial-signal", path = "../tg-rcore-tutorial-signal", version = "0.4.8" }
 tg-signal-impl = { package = "tg-rcore-tutorial-signal-impl", path = "../tg-rcore-tutorial-signal-impl", version = "0.4.8" }
@@ -47,6 +47,6 @@ tg-sync = { package = "chenzt23-tg-rcore-tutorial-sync", path = "../tg-rcore-tut
 
 [build-dependencies]
 tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }
-tg-easy-fs = { package = "chenzt23-tg-rcore-tutorial-easy-fs", path = "../tg-rcore-tutorial-easy-fs", version = "0.0.1-preview.1" }
+tg-easy-fs = { package = "chenzt23-tg-rcore-tutorial-easy-fs-t3l8", path = "../tg-rcore-tutorial-easy-fs", version = "0.0.1-preview.1" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

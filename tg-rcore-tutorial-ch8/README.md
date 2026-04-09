@@ -2,15 +2,17 @@
 # 复现
 1. 通过crates.io：
    ```bash
-    cargo clone chenzt23-tg-rcore-tutorial-ch8
-    cd chenzt23-tg-rcore-tutorial-ch8
-    bash test.sh all
+    cargo clone chenzt23-tg-rcore-tutorial-ch8-t3l8
+    cd chenzt23-tg-rcore-tutorial-ch8-t3l8
+    cargo run
     ```
 2. 通过github：
     ```bash
      git clone git@github.com:MuZhao2333/tg-rcore-tutorial.git
-     cd tg-rcore-tutorial/tg-rcore-tutorial-ch8
-     bash test.sh all
+     cd tg-rcore-tutorial
+     git checkout t3l8
+     cd tg-rcore-tutorial-ch8
+     cargo run
     ```
 
 # 第八章：并发
