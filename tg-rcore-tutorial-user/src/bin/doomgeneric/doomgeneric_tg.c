@@ -62,16 +62,62 @@ static size_t  g_fb_h = 0;         // framebuffer 高度
 static size_t  g_fb_pitch = 0;     // 每行字节数（含 stride 填充）
 
 // ============================================================================
-// 按键队列（轮询模式）
+// 按键队列（支持多键同时按住）
 // ============================================================================
 
+#define MAX_SIMULTANEOUS_KEYS 16
+
+// 按键释放定时器：为每个按下的键，在固定时间后自动生成 release
+typedef struct {
+    uint8_t doom_key;         // 要释放的 doom key
+    uint32_t release_time;     // 到期时间（毫秒）
+} KeyReleaseTimer;
+
+static KeyReleaseTimer g_release_timers[32];
+static unsigned int g_release_timer_count = 0;
+
+// 按键队列（存储 Doom key 事件）
 static unsigned short g_key_queue[64];
 static unsigned int   g_key_write = 0;
 static unsigned int   g_key_read  = 0;
-// 当前认为正在按住的 Doom key（-1 表示无按住状态）
-static int           g_pending_key = -1;
-// 按住时，延迟这么久才触发 release（避免快速松开）
-static uint32_t      g_release_deadline = 0;
+
+// 按键自动释放延迟：按下后这么久自动生成 release
+#define KEY_AUTO_RELEASE_MS 100
+
+// ============================================================================
+// 按键状态调试：记录最近的事件供诊断
+// ============================================================================
+
+// 初始化按键状态
+static void keys_init(void) {
+    g_release_timer_count = 0;
+    g_key_write = 0;
+    g_key_read = 0;
+
+    // 清空释放定时器
+    for (int i = 0; i < 32; i++) {
+        g_release_timers[i].doom_key = 0;
+        g_release_timers[i].release_time = 0;
+    }
+
+    // 清空按键队列
+    for (int i = 0; i < 64; i++) {
+        g_key_queue[i] = 0;
+    }
+
+    // 清空 UART 输入缓冲区（消费掉所有残留数据）
+    printf("[KEY] 初始化：清空 UART 缓冲区...\n");
+    int32_t drained = 0;
+    int32_t raw;
+    while ((raw = tg_getchar_poll()) >= 0) {
+        drained++;
+    }
+    if (drained > 0) {
+        printf("[KEY]  清空 %d 个残留字符\n", drained);
+    }
+
+    printf("[KEY]  按键系统已初始化\n");
+}
 
 // ASCII -> Doom key 映射
 static uint8_t map_ascii_to_doom(uint8_t ch) {
@@ -95,36 +141,58 @@ static void push_key(int pressed, uint8_t doom_key) {
     g_key_write = (g_key_write + 1u) % 64u;
 }
 
-// 轮询一次键盘：将 UART 输入转换为 Doom key 事件
-static void poll_keys_once(void) {
-    uint32_t now = tg_get_ticks_ms();
-    int32_t raw = tg_getchar_poll();
-
-    if (raw >= 0 && raw <= 255) {
-        uint8_t key = map_ascii_to_doom((uint8_t)raw);
-
-        // 如果是同一按键：延长按住时间，不触发 release
-        if (g_pending_key == (int)key) {
-            g_release_deadline = now + 100;
+// 添加一个 release 定时器（如果已有则重新调度）
+static void schedule_release(uint8_t doom_key, uint32_t release_time) {
+    // 检查是否已有此键的定时器
+    for (unsigned int i = 0; i < g_release_timer_count; i++) {
+        if (g_release_timers[i].doom_key == doom_key) {
+            g_release_timers[i].release_time = release_time;
+            printf("[KEY]  重调度 release key=0x%02x at %u ms\n", doom_key, release_time);
             return;
         }
-
-        // 新按键：先释放旧按键
-        if (g_pending_key >= 0) {
-            push_key(0, (uint8_t)g_pending_key);
-        }
-
-        // 报 Press 事件并进入按住态
-        push_key(1, key);
-        g_pending_key = (int)key;
-        g_release_deadline = now + 100;
-        return;
     }
+    // 新键：添加 release 定时器
+    if (g_release_timer_count < 32) {
+        g_release_timers[g_release_timer_count].doom_key = doom_key;
+        g_release_timers[g_release_timer_count].release_time = release_time;
+        g_release_timer_count++;
+        printf("[KEY]  调度 release key=0x%02x at %u ms\n", doom_key, release_time);
+    }
+}
 
-    // 无输入时，到达 deadline 才释放
-    if (g_pending_key >= 0 && (int32_t)(now - g_release_deadline) >= 0) {
-        push_key(0, (uint8_t)g_pending_key);
-        g_pending_key = -1;
+// 轮询键盘输入：读取所有可用的 UART 输入
+static void poll_keys(uint32_t now) {
+    int32_t raw;
+    while ((raw = tg_getchar_poll()) >= 0 && raw <= 255) {
+        uint8_t doom_key = map_ascii_to_doom((uint8_t)raw);
+        printf("[KEY]  UART输入 raw=%d('%c') → doom_key=0x%02x\n", raw, raw, doom_key);
+
+        // 立即生成 press 事件
+        push_key(1, doom_key);
+        printf("[KEY]  → press key=0x%02x\n", doom_key);
+
+        // 调度 release 事件（覆盖之前的定时器）
+        schedule_release(doom_key, now + KEY_AUTO_RELEASE_MS);
+    }
+}
+
+// 检查释放定时器是否到期
+static void check_release_timers(uint32_t now) {
+    for (unsigned int i = 0; i < g_release_timer_count; ) {
+        if ((int32_t)(now - g_release_timers[i].release_time) >= 0) {
+            uint8_t doom_key = g_release_timers[i].doom_key;
+            push_key(0, doom_key);
+            printf("[KEY]  → auto release key=0x%02x\n", doom_key);
+
+            // 移除定时器：将后面的前移
+            for (unsigned int j = i; j < g_release_timer_count - 1; j++) {
+                g_release_timers[j] = g_release_timers[j + 1];
+            }
+            g_release_timer_count--;
+            // 不 i++，检查当前位置
+        } else {
+            i++;
+        }
     }
 }
 
@@ -166,6 +234,9 @@ static void clear_fb(uint32_t color) {
 // ============================================================================
 
 void DG_Init(void) {
+    // 初始化按键系统
+    keys_init();
+
     // 设置轮询输入模式
     tg_set_input_mode_polling();
 
@@ -261,7 +332,15 @@ uint32_t DG_GetTicksMs(void) {
 
 // 按键获取：从轮询队列中取出一个事件
 int DG_GetKey(int *pressed, unsigned char *key) {
-    poll_keys_once();
+    uint32_t now = tg_get_ticks_ms();
+
+    // 轮询键盘：处理新按下
+    poll_keys(now);
+
+    // 检查释放定时器是否到期
+    check_release_timers(now);
+
+    // 从队列取出事件
     if (g_key_read == g_key_write) return 0;
     unsigned short data = g_key_queue[g_key_read];
     g_key_read = (g_key_read + 1u) % 64u;
